@@ -30,7 +30,7 @@ liquidLapse/
 1. **Clone the Repository:**
 
    ```bash
-   git clone https://github.com/yourusername/liquidLapse.git
+   git clone https://github.com/alireza787b/liquidLapse.git
    cd liquidLapse
    ```
 
