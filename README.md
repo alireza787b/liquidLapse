@@ -1,112 +1,116 @@
-## Overview
+Below is a complete README in Markdown that recaps your project details, explains the purpose of the setup script, and provides instructions for installation and usage.
 
-This project demonstrates a novel framework for real-time cognitive monitoring of pilots by predicting the exceedance shape factor—a robust indicator of deviations from ideal flight parameters. The system fuses multimodal data from non-intrusive eye-tracking and control stick inputs using advanced signal processing (Continuous Wavelet Transform) to generate scalograms. These scalograms are then used as inputs to deep Convolutional Neural Networks (CNNs) for regression. The framework has potential applications in aviation, driving, train operations, and air traffic control.
+# liquidLapse
 
----
+**liquidLapse** is a Python automation project that periodically captures snapshots of the CoinGlass liquidation heatmap. Each snapshot is saved with a timestamp in a date-organized folder, allowing you to later playback or review the history of the heatmap.
 
-## Repository Structure
+## Features
 
-- **data/**  
-  Contains raw and preprocessed data (scalogram images, flight data, etc.).
+- **Automated Snapshot Capture:** Uses Selenium in headless mode to load the CoinGlass heatmap page, capture the heatmap (canvas element) as an image, and save it with an informative timestamp.
+- **Configurable Settings:** Reads settings (such as the URL, snapshot interval, output folder, and headless mode) from a `config.yaml` file.
+- **Robust Environment Setup:** Includes a setup script (`setup.sh`) that installs required system packages, Python dependencies, and ensures that Google Chrome and ChromeDriver are available.
+- **Organized Output:** Snapshots are stored in a folder structure by date, with filenames that include the full date and time.
+- **Cross-Platform Support:** The project is designed to work on both Windows and Linux (headless servers) environments.
 
-- **src/**  
-  Source code for signal processing, feature extraction, and deep learning model training.
+## Project Structure
 
-- **models/**  
-  Pre-trained CNN models and scripts for network adaptation.
+```
+liquidLapse/
+├── config.yaml
+├── liquidLapse.py
+├── requirements.txt
+├── README.md
+└── setup.sh
+```
 
-- **docs/**  
-  Supplementary materials, documentation, and the paper’s final version.
+## Installation
 
-- **setup.sh**  
-  Bash script for setting up the environment and installing dependencies.
-
-- **README.md**  
-  This file.
-
----
-
-## Requirements
-
-- **Python:** 3.7 or higher  
-- **MATLAB:** Required for running signal processing scripts  
-- **Deep Learning Framework:** TensorFlow or PyTorch (depending on your configuration)  
-- **GNU Bash:** For running the setup script  
-- **Other Dependencies:** Listed in `requirements.txt`
-
----
-
-## Setup Instructions
+### On Linux (or any system with bash):
 
 1. **Clone the Repository:**
 
    ```bash
-   git clone https://github.com/yourusername/your-repo.git
-   cd your-repo
+   git clone https://github.com/yourusername/liquidLapse.git
+   cd liquidLapse
    ```
 
 2. **Run the Setup Script:**
 
-   The `setup.sh` script installs the necessary Python dependencies and configures the environment.
-   
+   Make sure the setup script is executable:
    ```bash
    chmod +x setup.sh
+   ```
+
+   Then run it:
+   ```bash
    ./setup.sh
    ```
 
-3. **Configure MATLAB:**
+   The setup script will:
+   - Update your package repositories.
+   - Check for and install Python3, pip3, and the `python3-venv` module if they aren’t installed.
+   - Check for Google Chrome and install it if missing.
+   - Create and activate a Python virtual environment.
+   - Upgrade pip and install the required Python dependencies from `requirements.txt`.
 
-   Ensure MATLAB is set up to run the scripts in the `src/` directory. Update any necessary file paths in the MATLAB scripts.
+3. **Activate the Virtual Environment and Run the Script:**
 
-4. **Download Pre-trained Models (if needed):**
+   ```bash
+   source venv/bin/activate
+   python liquidLapse.py
+   ```
 
-   If pre-trained models are not present in the `models/` folder, download them from [Insert Link Here] and place them accordingly.
+   Press `Ctrl+C` to terminate the script when needed.
 
----
+### On Windows:
 
-## Running the Project
+You can use the provided setup instructions in the README and run the equivalent commands in a Git Bash terminal or via PowerShell (with adjustments to the virtual environment activation command).
 
-### 1. Data Preprocessing and Feature Extraction
+## Configuration
 
-Run the MATLAB script to preprocess raw data and generate scalograms:
-   
-```matlab
-run('src/preprocess_and_extract.m');
+Edit the `config.yaml` file to set your preferences:
+
+```yaml
+# config.yaml
+url: "https://www.coinglass.com/pro/futures/LiquidationHeatMap"
+check_interval: 300         # Time in seconds between snapshots
+output_folder: "heatmap_snapshots"
+headless: true              # Set to true to run Chrome in headless mode
 ```
 
-### 2. Model Training
+## Usage
 
-Train the deep learning models using the provided configuration:
-   
-```bash
-python src/train_model.py --config configs/training_config.yaml
+Once setup is complete and the dependencies are installed, run the main script to start capturing snapshots:
+
+1. **Activate your Virtual Environment:**
+   ```bash
+   source venv/bin/activate   # On Windows use: venv\Scripts\activate
+   ```
+
+2. **Run the Main Script:**
+   ```bash
+   python liquidLapse.py
+   ```
+
+Snapshots will be saved inside the folder specified in `config.yaml` (organized by date), and each file will be named with a timestamp (e.g., `heatmap_20250328_172525.png`).
+
+## Additional Notes
+
+- **Deployment on a Linux Server:**  
+  With headless mode enabled (via the `headless: true` config), the script runs without a GUI, making it perfect for Linux servers.
+- **Scheduling:**  
+  You can use cron (on Linux) or Windows Task Scheduler to run `liquidLapse.py` at regular intervals if you prefer not to have it running continuously.
+
+## Dependencies
+
+All Python dependencies are listed in `requirements.txt`:
 ```
-
-### 3. Model Evaluation
-
-Evaluate the trained model using the test data:
-   
-```bash
-python src/evaluate_model.py --model models/best_model.h5 --data data/test/
+selenium
+webdriver-manager
+PyYAML
 ```
-
----
-
-## References
-
-For detailed context and additional documentation, please refer to the supplementary materials in the `docs/` folder.
-
----
-
-## Contact
-
-For questions or issues, please contact the corresponding author:  
-**Fariborz Saghafi**  
-Faculty of Aerospace Engineering Department, Sharif University of Technology, Tehran, Iran  
-Email: [saghafi@sharif.edu](mailto:saghafi@sharif.edu)
-
----
 
 ## License
 
 This project is licensed under the Apache 2.0 License.
+
