@@ -2,13 +2,12 @@
 """
 liquidLapse.py
 
-This script automatically loads a specified URL, waits for the heatmap canvas to render,
-captures the canvas image, and saves it with a timestamp. The configuration settings (such as
-URL, check interval, output folder, and headless mode) are loaded from a YAML config file.
+This script loads a specified URL, waits for the heatmap canvas to render,
+captures the canvas image, and saves it with a timestamped filename in a specified output folder.
+Configuration settings (such as URL, output folder, and headless mode) are loaded from a YAML config file.
 """
 
 import os
-import time
 import base64
 import re
 import yaml
@@ -21,6 +20,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 import tempfile
+import shutil
 
 # Configure logging
 logging.basicConfig(level=logging.INFO,
@@ -44,7 +44,6 @@ def setup_driver(headless=True):
     """
     options = webdriver.ChromeOptions()
     if headless:
-        # Use '--headless=new' for newer Chrome versions (v109+)
         options.add_argument("--headless=new")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
@@ -53,10 +52,10 @@ def setup_driver(headless=True):
     # Create a unique temporary directory for Chrome user data
     temp_dir = tempfile.mkdtemp()
     options.add_argument(f"--user-data-dir={temp_dir}")
-    
+
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
-    return driver
+    return driver, temp_dir
 
 
 def dismiss_popups(driver):
@@ -70,7 +69,6 @@ def dismiss_popups(driver):
         )
         consent_btn.click()
         logging.info("Consent popup dismissed.")
-        time.sleep(1)
     except Exception:
         logging.info("No consent popup detected.")
 
@@ -103,11 +101,10 @@ def save_snapshot(image_bytes, output_folder):
     if image_bytes is None:
         logging.error("No image data to save.")
         return
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    # Create an output folder with today's date inside the base folder
-    folder = os.path.join(output_folder, datetime.now().strftime("%Y-%m-%d"))
-    os.makedirs(folder, exist_ok=True)
-    out_path = os.path.join(folder, f"heatmap_{timestamp}.png")
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"heatmap_{timestamp}.png"
+    os.makedirs(output_folder, exist_ok=True)
+    out_path = os.path.join(output_folder, filename)
     with open(out_path, "wb") as f:
         f.write(image_bytes)
     logging.info(f"Snapshot saved to {out_path}")
@@ -117,32 +114,28 @@ def main():
     # Load configuration
     config = load_config()
     url = config.get("url")
-    check_interval = config.get("check_interval", 300)
     output_folder = config.get("output_folder", "heatmap_snapshots")
     headless = config.get("headless", True)
 
     logging.info("Starting liquidLapse...")
-    driver = setup_driver(headless=headless)
+    driver, temp_dir = setup_driver(headless=headless)
 
     try:
-        while True:
-            logging.info(f"Navigating to {url}")
-            driver.get(url)
-            # Wait for the page to load completely
-            time.sleep(10)
-            dismiss_popups(driver)
+        logging.info(f"Navigating to {url}")
+        driver.get(url)
+        # Wait for the page to load completely
+        driver.implicitly_wait(10)
+        dismiss_popups(driver)
 
-            image_bytes = capture_canvas_snapshot(driver)
-            save_snapshot(image_bytes, output_folder)
+        image_bytes = capture_canvas_snapshot(driver)
+        save_snapshot(image_bytes, output_folder)
 
-            logging.info(f"Waiting {check_interval} seconds until next snapshot...")
-            time.sleep(check_interval)
-    except KeyboardInterrupt:
-        logging.info("Terminated by user.")
     except Exception as e:
         logging.error(f"Unexpected error: {e}")
     finally:
         driver.quit()
+        # Clean up the temporary user data directory
+        shutil.rmtree(temp_dir)
 
 
 if __name__ == "__main__":
