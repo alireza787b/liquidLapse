@@ -1,99 +1,112 @@
-# liquidLapse
+## Overview
 
-**liquidLapse** is a Python automation project that periodically captures snapshots of the CoinGlass liquidation heatmap. Snapshots are saved with informative date-time stamps for later playback.
+This project demonstrates a novel framework for real-time cognitive monitoring of pilots by predicting the exceedance shape factor—a robust indicator of deviations from ideal flight parameters. The system fuses multimodal data from non-intrusive eye-tracking and control stick inputs using advanced signal processing (Continuous Wavelet Transform) to generate scalograms. These scalograms are then used as inputs to deep Convolutional Neural Networks (CNNs) for regression. The framework has potential applications in aviation, driving, train operations, and air traffic control.
 
-## Features
+---
 
-- Loads configuration from a YAML file (`config.yaml`).
-- Uses Selenium with headless Chrome (via `webdriver-manager`).
-- Captures the heatmap canvas directly by extracting its pixel data.
-- Saves snapshots in a directory structure organized by date.
-- Runs in an infinite loop at a configurable interval.
+## Repository Structure
+
+- **data/**  
+  Contains raw and preprocessed data (scalogram images, flight data, etc.).
+
+- **src/**  
+  Source code for signal processing, feature extraction, and deep learning model training.
+
+- **models/**  
+  Pre-trained CNN models and scripts for network adaptation.
+
+- **docs/**  
+  Supplementary materials, documentation, and the paper’s final version.
+
+- **setup.sh**  
+  Bash script for setting up the environment and installing dependencies.
+
+- **README.md**  
+  This file.
+
+---
 
 ## Requirements
 
-- Python 3.6+
-- Google Chrome (or Chromium)
-- [ChromeDriver](https://sites.google.com/chromium.org/driver/) (automatically managed via `webdriver-manager`)
+- **Python:** 3.7 or higher  
+- **MATLAB:** Required for running signal processing scripts  
+- **Deep Learning Framework:** TensorFlow or PyTorch (depending on your configuration)  
+- **GNU Bash:** For running the setup script  
+- **Other Dependencies:** Listed in `requirements.txt`
 
-## Installation
+---
 
-1. Clone this repository:
+## Setup Instructions
+
+1. **Clone the Repository:**
+
    ```bash
-   git clone https://github.com/yourusername/liquidLapse.git
-   cd liquidLapse
+   git clone https://github.com/yourusername/your-repo.git
+   cd your-repo
    ```
 
-2. (Optional) Create and activate a virtual environment:
+2. **Run the Setup Script:**
+
+   The `setup.sh` script installs the necessary Python dependencies and configures the environment.
+   
    ```bash
-   python -m venv venv
-   source venv/bin/activate   # On Windows: venv\Scripts\activate
+   chmod +x setup.sh
+   ./setup.sh
    ```
 
-3. Install the dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+3. **Configure MATLAB:**
 
-## Configuration
+   Ensure MATLAB is set up to run the scripts in the `src/` directory. Update any necessary file paths in the MATLAB scripts.
 
-Edit the `config.yaml` file to adjust:
-- `url`: The URL to capture.
-- `check_interval`: Time in seconds between snapshots.
-- `output_folder`: Base folder where snapshots will be saved.
-- `headless`: Set to `true` to run in headless mode.
+4. **Download Pre-trained Models (if needed):**
 
-## Running the Script
+   If pre-trained models are not present in the `models/` folder, download them from [Insert Link Here] and place them accordingly.
 
-To start capturing snapshots, run:
-```bash
-python liquidLapse.py
+---
+
+## Running the Project
+
+### 1. Data Preprocessing and Feature Extraction
+
+Run the MATLAB script to preprocess raw data and generate scalograms:
+   
+```matlab
+run('src/preprocess_and_extract.m');
 ```
 
-Press `Ctrl+C` to terminate the script.
+### 2. Model Training
 
-## Deployment on Linux (Headless Server)
+Train the deep learning models using the provided configuration:
+   
+```bash
+python src/train_model.py --config configs/training_config.yaml
+```
 
-The script is designed to run in headless mode, making it suitable for deployment on a Linux server without a GUI.
+### 3. Model Evaluation
 
-You can use the provided `setup.sh` script (see below) to install dependencies in your server environment.
-
-## License
-
-Apache 2.0 License 
+Evaluate the trained model using the test data:
+   
+```bash
+python src/evaluate_model.py --model models/best_model.h5 --data data/test/
 ```
 
 ---
 
-### 5. **setup.sh**
+## References
 
-A sample bash script to help set up your environment on Linux. This script creates a virtual environment and installs dependencies.
+For detailed context and additional documentation, please refer to the supplementary materials in the `docs/` folder.
 
-```bash
-#!/bin/bash
-# setup.sh - Setup environment for liquidLapse
+---
 
-# Exit immediately if a command exits with a non-zero status.
-set -e
+## Contact
 
-echo "Creating virtual environment..."
-python3 -m venv venv
+For questions or issues, please contact the corresponding author:  
+**Fariborz Saghafi**  
+Faculty of Aerospace Engineering Department, Sharif University of Technology, Tehran, Iran  
+Email: [saghafi@sharif.edu](mailto:saghafi@sharif.edu)
 
-echo "Activating virtual environment..."
-source venv/bin/activate
+---
 
-echo "Installing dependencies..."
-pip install --upgrade pip
-pip install -r requirements.txt
+## License
 
-echo "Setup complete. To run the script, activate the virtual environment with:"
-echo "source venv/bin/activate"
-echo "then run: python liquidLapse.py"
-```
-
-Make the script executable:
-
-```bash
-chmod +x setup.sh
-```
-
+This project is licensed under the Apache 2.0 License.
