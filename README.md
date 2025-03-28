@@ -60,7 +60,7 @@ You can use the provided `setup.sh` script (see below) to install dependencies i
 
 ## License
 
-MIT License 
+Apache 2.0 License 
 ```
 
 ---
