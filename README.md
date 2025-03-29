@@ -124,14 +124,6 @@ headless: true              # Run Chrome in headless mode
 - **Logs:**  
   Runtime logs are saved to `liquidLapse.log`. If the service stops unexpectedly, check the log for troubleshooting details.
 
-## Dependencies
-
-All Python dependencies are listed in `requirements.txt`:
-```
-selenium
-webdriver-manager
-PyYAML
-```
 
 ## License
 
