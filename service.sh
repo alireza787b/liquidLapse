@@ -158,27 +158,34 @@ stop_service() {
 }
 
 # Function to display detailed service status
+# Function to display service status
 status_service() {
     if [ -f "$PIDFILE" ]; then
         PID=$(cat "$PIDFILE")
         if ps -p "$PID" > /dev/null; then
             success "Service is running (PID: $PID)."
+            last_exec=$(grep "Running snapshot" liquidLapseService.log | tail -1 | awk '{print $1, $2}')
+            interval=$(grep "interval set to" liquidLapseService.log | tail -1 | awk '{print $9}')
+            if [ -n "$last_exec" ] && [ -n "$interval" ]; then
+                last_exec_time=$(date -d "$last_exec" +%s)
+                next_exec_time=$((last_exec_time + interval))
+                next_exec=$(date -d "@$next_exec_time" "+%Y-%m-%d %H:%M:%S")
+                echo -e "${BLUE}--- Service Status ---${NC}"
+                echo -e "${BLUE}Last Execution: $last_exec${NC}"
+                echo -e "${BLUE}Next Execution: $next_exec${NC}"
+                echo -e "${BLUE}Interval: ${interval} seconds${NC}"
+                echo -e "${BLUE}----------------------${NC}"
+            else
+                echo -e "${RED}Unable to determine last and next execution times.${NC}"
+            fi
         else
             error "Service is not running, but PID file exists."
         fi
     else
         error "Service is not running."
     fi
-
-    # Display status details if available
-    if [ -f "$STATUSFILE" ]; then
-        echo -e "${BLUE}--- Service Status ---${NC}"
-        cat "$STATUSFILE"
-        echo -e "${BLUE}----------------------${NC}"
-    else
-        info "No status file available."
-    fi
 }
+
 
 # Function to restart the service
 restart_service() {
