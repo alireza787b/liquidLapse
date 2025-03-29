@@ -1,80 +1,132 @@
 #!/bin/bash
-# service.sh - Manage the liquidLapse service (start, stop, restart, status)
+# service.sh - Manage the liquidLapse service to take periodic snapshots.
 # This script will:
-#  - Source the Python virtual environment
-#  - Start the liquidLapse.py script as a background service
-#  - Store the process ID (PID) in a file for later control
-#  - Provide informative, colored output
+#  - Activate the Python virtual environment.
+#  - Read the check interval from config.yaml.
+#  - Run the liquidLapse.py script to take one snapshot.
+#  - Sleep for the configured period.
+#  - Repeat the process, providing informative, colored output.
+#
+# Ensure that liquidLapse.py is a one-shot script (i.e. it takes a snapshot and then exits).
+# If liquidLapse.py currently runs continuously, modify it accordingly.
+#
+# Usage: ./service.sh {start|stop|status|restart}
+# A PID file (liquidLapseService.pid) is used to manage the background process.
 
 set -e
 
 # Get the absolute path of the current directory
 BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Define paths for the virtual environment, main script, and PID file
+# Paths for the virtual environment, main script, and PID file
 VENV_DIR="$BASE_DIR/venv"
 PYTHON="$VENV_DIR/bin/python"
 SCRIPT="$BASE_DIR/liquidLapse.py"
-PIDFILE="$BASE_DIR/liquidLapse.pid"
+PIDFILE="$BASE_DIR/liquidLapseService.pid"
 
 # Colored output definitions
 GREEN='\033[0;32m'
+BLUE='\033[0;34m'
 RED='\033[0;31m'
-NC='\033[0m' # No Color
+NC='\033[0m'  # No Color
 
-# Function to start the service
+# Function to print info messages
+info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
+
+# Function to print success messages
+success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+# Function to print error messages
+error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# Function to read the check_interval from config.yaml
+get_interval() {
+    # Use the virtualenv's python to load and print the 'check_interval' value
+    interval=$($PYTHON -c "import yaml; print(yaml.safe_load(open('config.yaml'))['check_interval'])")
+    echo "$interval"
+}
+
+# Function that runs the snapshot service in a loop
+run_service() {
+    info "Starting liquidLapse snapshot service..."
+    while true; do
+        # Read the period from config.yaml
+        PERIOD=$(get_interval)
+        info "Running snapshot (interval set to ${PERIOD} seconds)..."
+        
+        # Run the main Python snapshot script
+        $PYTHON "$SCRIPT"
+        
+        info "Snapshot complete. Sleeping for ${PERIOD} seconds..."
+        sleep "$PERIOD"
+    done
+}
+
+# Function to start the service as a background process
 start_service() {
     if [ -f "$PIDFILE" ]; then
         PID=$(cat "$PIDFILE")
-        if ps -p $PID > /dev/null; then
-            echo -e "${GREEN}Service is already running (PID: $PID).${NC}"
+        if ps -p "$PID" > /dev/null; then
+            success "Service is already running (PID: $PID)."
             exit 0
         else
-            echo "Removing stale PID file."
+            info "Found stale PID file. Removing it."
             rm -f "$PIDFILE"
         fi
     fi
-    echo "Starting liquidLapse service..."
+
+    info "Activating virtual environment and starting service..."
     cd "$BASE_DIR"
-    source "$VENV_DIR/bin/activate"
-    nohup $PYTHON "$SCRIPT" > liquidLapse.log 2>&1 &
+    # Ensure the virtual environment exists
+    if [ ! -d "$VENV_DIR" ]; then
+        error "Virtual environment not found. Please run setup.sh first."
+        exit 1
+    fi
+
+    # Start the service in the background, redirecting output to a log file.
+    nohup bash -c "source \"$VENV_DIR/bin/activate\" && run_service" > liquidLapseService.log 2>&1 &
     echo $! > "$PIDFILE"
-    echo -e "${GREEN}Service started with PID: $(cat "$PIDFILE")${NC}"
+    success "Service started with PID: $(cat "$PIDFILE")."
 }
 
 # Function to stop the service
 stop_service() {
     if [ ! -f "$PIDFILE" ]; then
-        echo -e "${RED}Service is not running (PID file not found).${NC}"
+        error "Service is not running (PID file not found)."
         exit 1
     fi
     PID=$(cat "$PIDFILE")
-    if ps -p $PID > /dev/null; then
-        echo "Stopping liquidLapse service (PID: $PID)..."
-        kill $PID
-        while ps -p $PID > /dev/null; do
+    if ps -p "$PID" > /dev/null; then
+        info "Stopping service (PID: $PID)..."
+        kill "$PID"
+        while ps -p "$PID" > /dev/null; do
             sleep 1
         done
-        echo "Service stopped."
         rm -f "$PIDFILE"
-        echo -e "${GREEN}Service stopped successfully.${NC}"
+        success "Service stopped."
     else
-        echo -e "${RED}No process found for PID: $PID. Removing PID file.${NC}"
+        error "No process found for PID: $PID. Removing PID file."
         rm -f "$PIDFILE"
     fi
 }
 
-# Function to check the service status
+# Function to display service status
 status_service() {
     if [ -f "$PIDFILE" ]; then
         PID=$(cat "$PIDFILE")
-        if ps -p $PID > /dev/null; then
-            echo -e "${GREEN}Service is running (PID: $PID).${NC}"
+        if ps -p "$PID" > /dev/null; then
+            success "Service is running (PID: $PID)."
         else
-            echo -e "${RED}Service is not running, but PID file exists.${NC}"
+            error "Service is not running, but PID file exists."
         fi
     else
-        echo -e "${RED}Service is not running.${NC}"
+        error "Service is not running."
     fi
 }
 
