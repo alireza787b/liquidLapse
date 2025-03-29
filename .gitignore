@@ -175,3 +175,5 @@ cython_debug/
 
 
 heatmap_snapshots/
+
+*.status
