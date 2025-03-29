@@ -1,24 +1,22 @@
 #!/bin/bash
-# service.sh - Manage the liquidLapse service to take periodic snapshots.
+# service.sh - Manage the liquidLapse service (start, stop, restart, status)
 # This script will:
 #  - Activate the Python virtual environment.
-#  - Read the check interval from config.yaml.
-#  - Run the liquidLapse.py script to take one snapshot.
+#  - Read the snapshot interval from config.yaml.
+#  - Run liquidLapse.py to capture a snapshot.
 #  - Sleep for the configured period.
-#  - Repeat the process, providing informative, colored output.
+#  - Repeat the process in an infinite loop.
 #
-# Ensure that liquidLapse.py is a one-shot script (i.e. it takes a snapshot and then exits).
-# If liquidLapse.py currently runs continuously, modify it accordingly.
-#
-# Usage: ./service.sh {start|stop|status|restart}
 # A PID file (liquidLapseService.pid) is used to manage the background process.
+#
+# Usage: ./service.sh {start|stop|restart|status}
 
 set -e
 
 # Get the absolute path of the current directory
 BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Paths for the virtual environment, main script, and PID file
+# Define paths for the virtual environment, main script, and PID file
 VENV_DIR="$BASE_DIR/venv"
 PYTHON="$VENV_DIR/bin/python"
 SCRIPT="$BASE_DIR/liquidLapse.py"
@@ -28,47 +26,25 @@ PIDFILE="$BASE_DIR/liquidLapseService.pid"
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
-NC='\033[0m'  # No Color
+NC='\033[0m' # No Color
 
-# Function to print info messages
+# Functions for printing messages
 info() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
-
-# Function to print success messages
 success() {
     echo -e "${GREEN}[SUCCESS]${NC} $1"
 }
-
-# Function to print error messages
 error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Function to read the check_interval from config.yaml
+# Function to read check_interval from config.yaml using the virtualenv's Python
 get_interval() {
-    # Use the virtualenv's python to load and print the 'check_interval' value
-    interval=$($PYTHON -c "import yaml; print(yaml.safe_load(open('config.yaml'))['check_interval'])")
-    echo "$interval"
+    $PYTHON -c "import yaml; print(yaml.safe_load(open('config.yaml'))['check_interval'])"
 }
 
-# Function that runs the snapshot service in a loop
-run_service() {
-    info "Starting liquidLapse snapshot service..."
-    while true; do
-        # Read the period from config.yaml
-        PERIOD=$(get_interval)
-        info "Running snapshot (interval set to ${PERIOD} seconds)..."
-        
-        # Run the main Python snapshot script
-        $PYTHON "$SCRIPT"
-        
-        info "Snapshot complete. Sleeping for ${PERIOD} seconds..."
-        sleep "$PERIOD"
-    done
-}
-
-# Function to start the service as a background process
+# Function to start the service (periodic snapshot loop)
 start_service() {
     if [ -f "$PIDFILE" ]; then
         PID=$(cat "$PIDFILE")
@@ -83,14 +59,23 @@ start_service() {
 
     info "Activating virtual environment and starting service..."
     cd "$BASE_DIR"
-    # Ensure the virtual environment exists
     if [ ! -d "$VENV_DIR" ]; then
         error "Virtual environment not found. Please run setup.sh first."
         exit 1
     fi
 
-    # Start the service in the background, redirecting output to a log file.
-    nohup bash -c "source \"$VENV_DIR/bin/activate\" && run_service" > liquidLapseService.log 2>&1 &
+    # Inline the periodic loop in the nohup command.
+    nohup bash -c '
+        source "'"$VENV_DIR"'/bin/activate"
+        while true; do
+            PERIOD=$('"$PYTHON"' -c "import yaml; print(yaml.safe_load(open(\"config.yaml\"))[\"check_interval\"])")
+            echo -e "\033[0;34m[INFO]\033[0m Running snapshot (interval set to ${PERIOD} seconds)..."
+            '"$PYTHON"' liquidLapse.py
+            echo -e "\033[0;34m[INFO]\033[0m Snapshot complete. Sleeping for ${PERIOD} seconds..."
+            sleep ${PERIOD}
+        done
+    ' > liquidLapseService.log 2>&1 &
+
     echo $! > "$PIDFILE"
     success "Service started with PID: $(cat "$PIDFILE")."
 }
