@@ -3,8 +3,10 @@
 liquidLapse.py
 
 This script loads a specified URL, waits for the heatmap canvas to render,
-captures the canvas image, and saves it with a timestamped filename in a specified output folder.
-Configuration settings (such as URL, output folder, and headless mode) are loaded from a YAML config file.
+captures the canvas image, and saves it with a timestamped filename (optionally including
+the current Bitcoin price) in a specified output folder.
+Configuration settings (such as URL, output folder, headless mode, and whether to include
+the BTC price in the filename) are loaded from a YAML config file.
 """
 
 import os
@@ -12,6 +14,9 @@ import base64
 import re
 import yaml
 import logging
+import requests
+import tempfile
+import shutil
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -19,14 +24,11 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
-import tempfile
-import shutil
 
 # Configure logging
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(levelname)s] %(message)s",
                     datefmt="%Y-%m-%d %H:%M:%S")
-
 
 def load_config(config_path="config.yaml"):
     """
@@ -36,6 +38,21 @@ def load_config(config_path="config.yaml"):
         config = yaml.safe_load(file)
     return config
 
+def get_btc_price():
+    """
+    Fetch the current Bitcoin price (in USD) from the CoinGecko API.
+    Returns the price as a string (or None on error).
+    """
+    try:
+        url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        btc_price = data['bitcoin']['usd']
+        return str(btc_price)
+    except Exception as e:
+        logging.error(f"Error fetching BTC price: {e}")
+        return None
 
 def setup_driver(headless=True):
     """
@@ -57,7 +74,6 @@ def setup_driver(headless=True):
     driver = webdriver.Chrome(service=service, options=options)
     return driver, temp_dir
 
-
 def dismiss_popups(driver):
     """
     Dismiss any popups (e.g., cookie consent) that may block the page.
@@ -71,7 +87,6 @@ def dismiss_popups(driver):
         logging.info("Consent popup dismissed.")
     except Exception:
         logging.info("No consent popup detected.")
-
 
 def capture_canvas_snapshot(driver):
     """
@@ -93,22 +108,28 @@ def capture_canvas_snapshot(driver):
         logging.error(f"Error capturing canvas: {e}")
         return None
 
-
-def save_snapshot(image_bytes, output_folder):
+def save_snapshot(image_bytes, output_folder, include_price=False):
     """
     Save the binary image data to a PNG file with a timestamped filename.
+    If include_price is True, fetches the current BTC price and appends it to the filename.
     """
     if image_bytes is None:
         logging.error("No image data to save.")
         return
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    filename = f"heatmap_{timestamp}.png"
+    price_str = ""
+    if include_price:
+        btc_price = get_btc_price()
+        if btc_price is not None:
+            price_str = f"_BTC-{btc_price}"
+        else:
+            price_str = "_BTC-NA"
+    filename = f"heatmap_{timestamp}{price_str}.png"
     os.makedirs(output_folder, exist_ok=True)
     out_path = os.path.join(output_folder, filename)
     with open(out_path, "wb") as f:
         f.write(image_bytes)
     logging.info(f"Snapshot saved to {out_path}")
-
 
 def main():
     # Load configuration
@@ -116,6 +137,7 @@ def main():
     url = config.get("url")
     output_folder = config.get("output_folder", "heatmap_snapshots")
     headless = config.get("headless", True)
+    include_price = config.get("include_price_in_filename", False)
 
     logging.info("Starting liquidLapse...")
     driver, temp_dir = setup_driver(headless=headless)
@@ -128,15 +150,13 @@ def main():
         dismiss_popups(driver)
 
         image_bytes = capture_canvas_snapshot(driver)
-        save_snapshot(image_bytes, output_folder)
-
+        save_snapshot(image_bytes, output_folder, include_price)
     except Exception as e:
         logging.error(f"Unexpected error: {e}")
     finally:
         driver.quit()
         # Clean up the temporary user data directory
         shutil.rmtree(temp_dir)
-
 
 if __name__ == "__main__":
     main()

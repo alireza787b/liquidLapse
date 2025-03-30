@@ -3,3 +3,4 @@ url: "https://www.coinglass.com/pro/futures/LiquidationHeatMap"
 check_interval: 300         # Time interval between snapshots (in seconds)
 output_folder: "heatmap_snapshots"
 headless: true              # Run browser headless (true/false)
+include_price_in_filename: true  # Set to true to append BTC price to the filename
