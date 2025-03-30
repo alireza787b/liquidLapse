@@ -4,3 +4,4 @@ check_interval: 300         # Time interval between snapshots (in seconds)
 output_folder: "heatmap_snapshots"
 headless: true              # Run browser headless (true/false)
 include_price_in_filename: true  # Set to true to append BTC price to the filename
+btc_price_url: "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"

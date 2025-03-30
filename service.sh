@@ -6,10 +6,9 @@
 #   - Read the snapshot interval (check_interval) from config.yaml.
 #   - Run liquidLapse.py (which should take a single snapshot and exit).
 #   - Log execution details and update a status file with:
-#         Last execution time,
-#         Next scheduled execution time,
+#         Last snapshot execution time,
 #         Interval period,
-#         and any error if occurred.
+#         and any errors.
 #   - Repeat the process in an infinite loop until the service is stopped.
 #
 # A PID file (liquidLapseService.pid) is used to manage the background process.
@@ -21,7 +20,7 @@ set -e
 # Get the absolute path of the current directory
 BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# Define paths for the virtual environment, main script, PID file, and status file
+# Define paths for the virtual environment, main script, PID file, status file, and log file
 VENV_DIR="$BASE_DIR/venv"
 PYTHON="$VENV_DIR/bin/python"
 SCRIPT="$BASE_DIR/liquidLapse.py"
@@ -29,13 +28,13 @@ PIDFILE="$BASE_DIR/liquidLapseService.pid"
 STATUSFILE="$BASE_DIR/liquidLapseService.status"
 LOGFILE="$BASE_DIR/liquidLapseService.log"
 
-# Colored output definitions
+# Colored output for console messages only
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-# Functions for printing messages
+# Functions for printing console messages
 info() {
     echo -e "${BLUE}[INFO]${NC} $1"
 }
@@ -51,35 +50,33 @@ get_interval() {
     $PYTHON -c "import yaml; print(yaml.safe_load(open('config.yaml'))['check_interval'])"
 }
 
-# Function that runs the periodic snapshot loop and updates status.
+# Function that runs the periodic snapshot loop and updates the status file.
 run_service() {
-    # Infinite loop to take snapshots periodically
     while true; do
         # Get interval from config.yaml
-        PERIOD=$(get_interval)
+        PERIOD=$("$PYTHON" -c "import yaml; print(yaml.safe_load(open('config.yaml'))['check_interval'])")
         CURRENT_TIME=$(date "+%Y-%m-%d %H:%M:%S")
-        # Calculate next execution time using GNU date (-d "$PERIOD seconds")
-        NEXT_TIME=$(date -d "$PERIOD seconds" "+%Y-%m-%d %H:%M:%S")
         
-        # Update status file
-        echo "Last Execution: $CURRENT_TIME" > "$STATUSFILE"
-        echo "Next Execution: $NEXT_TIME" >> "$STATUSFILE"
-        echo "Interval: ${PERIOD} seconds" >> "$STATUSFILE"
+        # Update status file with a clear marker (plain text)
+        {
+            echo "SNAPSHOT_START: $CURRENT_TIME"
+            echo "INTERVAL: ${PERIOD} seconds"
+        } > "$STATUSFILE"
         
-        info "[$CURRENT_TIME] Running snapshot (interval: ${PERIOD} seconds)..."
-        
-        # Run the snapshot script and append output to log file
-        $PYTHON "$SCRIPT" >> "$LOGFILE" 2>&1
+        echo "[INFO] [$CURRENT_TIME] Running snapshot (interval: ${PERIOD} seconds)..."
+        "$PYTHON" "$SCRIPT" >> "$LOGFILE" 2>&1
         EXIT_CODE=$?
         if [ $EXIT_CODE -ne 0 ]; then
-            error "Snapshot failed with exit code $EXIT_CODE at $(date "+%Y-%m-%d %H:%M:%S")."
-            echo "Last Execution Error: Exit code $EXIT_CODE at $(date "+%Y-%m-%d %H:%M:%S")" >> "$STATUSFILE"
+            ERR_TIME=$(date "+%Y-%m-%d %H:%M:%S")
+            echo "[ERROR] Snapshot failed with exit code $EXIT_CODE at $ERR_TIME." >> "$LOGFILE"
+            echo "SNAPSHOT_ERROR: Exit code $EXIT_CODE at $ERR_TIME" >> "$STATUSFILE"
         else
-            success "Snapshot executed successfully at $(date "+%Y-%m-%d %H:%M:%S")."
-            echo "Last Execution Successful at $(date "+%Y-%m-%d %H:%M:%S")" >> "$STATUSFILE"
+            SUCCESS_TIME=$(date "+%Y-%m-%d %H:%M:%S")
+            echo "[SUCCESS] Snapshot executed successfully at $SUCCESS_TIME." >> "$LOGFILE"
+            echo "SNAPSHOT_SUCCESS: $SUCCESS_TIME" >> "$STATUSFILE"
         fi
 
-        info "Sleeping for ${PERIOD} seconds until next execution..."
+        echo "[INFO] Sleeping for ${PERIOD} seconds until next execution..."
         sleep "${PERIOD}"
     done
 }
@@ -104,28 +101,29 @@ start_service() {
         exit 1
     fi
 
-    # Start the service in the background. We inline the loop.
+    # Start the service in the background. Inline the periodic loop without ANSI codes for logging.
     nohup bash -c '
         source "'"$VENV_DIR"'/bin/activate"
         run_service() {
             while true; do
                 PERIOD=$('"$PYTHON"' -c "import yaml; print(yaml.safe_load(open(\"config.yaml\"))[\"check_interval\"])")
                 CURRENT_TIME=$(date "+%Y-%m-%d %H:%M:%S")
-                NEXT_TIME=$(date -d "$PERIOD seconds" "+%Y-%m-%d %H:%M:%S")
-                echo "Last Execution: $CURRENT_TIME" > "'"$STATUSFILE"'"
-                echo "Next Execution: $NEXT_TIME" >> "'"$STATUSFILE"'"
-                echo "Interval: ${PERIOD} seconds" >> "'"$STATUSFILE"'"
-                echo -e "\033[0;34m[INFO]\033[0m [$CURRENT_TIME] Running snapshot (interval: ${PERIOD} seconds)..."
-                '"$PYTHON"' liquidLapse.py >> "'"$LOGFILE"'" 2>&1
+                {
+                    echo "SNAPSHOT_START: $CURRENT_TIME"
+                    echo "INTERVAL: ${PERIOD} seconds"
+                } >> "'"$STATUSFILE"'"
+                echo "[INFO] [$CURRENT_TIME] Running snapshot (interval: ${PERIOD} seconds)..."
+                '"$PYTHON"' "'"$SCRIPT"'" >> "'"$LOGFILE"'" 2>&1
                 EXIT_CODE=$?
                 if [ $EXIT_CODE -ne 0 ]; then
-                    echo -e "\033[0;31m[ERROR]\033[0m Snapshot failed with exit code $EXIT_CODE at $(date "+%Y-%m-%d %H:%M:%S")." >> "'"$LOGFILE"'"
-                    echo "Last Execution Error: Exit code $EXIT_CODE at $(date "+%Y-%m-%d %H:%M:%S")" >> "'"$STATUSFILE"'"
+                    ERR_TIME=$(date "+%Y-%m-%d %H:%M:%S")
+                    echo "[ERROR] Snapshot failed with exit code $EXIT_CODE at $ERR_TIME." >> "'"$LOGFILE"'"
+                    echo "SNAPSHOT_ERROR: Exit code $EXIT_CODE at $ERR_TIME" >> "'"$STATUSFILE"'"
                 else
-                    echo -e "\033[0;32m[SUCCESS]\033[0m Snapshot executed successfully at $(date "+%Y-%m-%d %H:%M:%S")." >> "'"$LOGFILE"'"
-                    echo "Last Execution Successful at $(date "+%Y-%m-%d %H:%M:%S")" >> "'"$STATUSFILE"'"
+                    SUCCESS_TIME=$(date "+%Y-%m-%d %H:%M:%S")
+                    echo "[SUCCESS] Snapshot executed successfully at $SUCCESS_TIME." >> "'"$LOGFILE"'"
+                    echo "SNAPSHOT_SUCCESS: $SUCCESS_TIME" >> "'"$STATUSFILE"'"
                 fi
-                echo -e "\033[0;34m[INFO]\033[0m Sleeping for ${PERIOD} seconds until next execution..."
                 sleep ${PERIOD}
             done
         }
@@ -157,35 +155,27 @@ stop_service() {
     fi
 }
 
-# Function to display detailed service status
-# Function to display service status
+# Function to display detailed service status by reading the status file.
 status_service() {
     if [ -f "$PIDFILE" ]; then
         PID=$(cat "$PIDFILE")
         if ps -p "$PID" > /dev/null; then
             success "Service is running (PID: $PID)."
-            last_exec=$(grep "Running snapshot" liquidLapseService.log | tail -1 | awk '{print $1, $2}')
-            interval=$(grep "interval set to" liquidLapseService.log | tail -1 | awk '{print $9}')
-            if [ -n "$last_exec" ] && [ -n "$interval" ]; then
-                last_exec_time=$(date -d "$last_exec" +%s)
-                next_exec_time=$((last_exec_time + interval))
-                next_exec=$(date -d "@$next_exec_time" "+%Y-%m-%d %H:%M:%S")
-                echo -e "${BLUE}--- Service Status ---${NC}"
-                echo -e "${BLUE}Last Execution: $last_exec${NC}"
-                echo -e "${BLUE}Next Execution: $next_exec${NC}"
-                echo -e "${BLUE}Interval: ${interval} seconds${NC}"
-                echo -e "${BLUE}----------------------${NC}"
-            else
-                echo -e "${RED}Unable to determine last and next execution times.${NC}"
-            fi
         else
             error "Service is not running, but PID file exists."
         fi
     else
         error "Service is not running."
     fi
-}
 
+    if [ -f "$STATUSFILE" ]; then
+        echo -e "${BLUE}--- Service Status ---${NC}"
+        cat "$STATUSFILE"
+        echo -e "${BLUE}----------------------${NC}"
+    else
+        info "No status file available."
+    fi
+}
 
 # Function to restart the service
 restart_service() {
