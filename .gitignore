@@ -177,3 +177,5 @@ cython_debug/
 heatmap_snapshots/
 
 *.status
+
+ai_process/test1/

@@ -5,12 +5,22 @@ Preprocessor for Liquidity Heatmap Image Dataset
 This script processes heatmap images stored in a source directory by:
   - Parsing filenames to extract date, time, currency, and price.
   - Interpolating missing price values (marked as 'NA') using linear interpolation
-    based on the previous and next valid images.
-  - Computing the percentage change (without a decimal point) relative to the previous valid price.
-    The change is encoded as a string (e.g., "p0250" for a +2.50% change, "n0050" for a -0.50% change).
+    based on the previous and next valid images. For the first image, if missing,
+    it uses the next valid price.
+  - Computing the percentage change relative to the previous valid price ("step change")
+    and also the percentage change over an hourly window ("hourly change"). 
+    Both are calculated to three decimal places.
+    The "step" change is encoded as a string without decimals (e.g., "p0342" for +0.342%),
+    and stored as a numeric value in the field "change_percent_step".
+    The "hourly" change is stored as a numeric value in the field "change_percent_hour".
+    If no previous price exists, these default to 0.
+  - Adding an incremental ID (starting at 1) to each image; this ID is included as the first field
+    in the JSON metadata and prefixed in the new filename.
   - Copying images into a target session folder (e.g., "test1") under an "images" subfolder,
-    with new filenames that include the timestamp, currency, price, and change.
-  - Generating a JSON file (dataset_info.json) within the session folder that stores metadata for all processed images.
+    with new filenames that include the ID, timestamp, currency, price (formatted without a decimal point),
+    and encoded step change.
+  - Generating a JSON file (dataset_info.json) within the session folder containing metadata for all processed images,
+    including the UNIX timestamp.
 
 If target folders or files already exist, they will be replaced.
 
@@ -34,13 +44,16 @@ from datetime import datetime
 from pathlib import Path
 
 # =============================================================================
-# Global parameters (can be modified directly)
+# Global parameters (modifiable here; command-line arguments override these)
 # =============================================================================
 DEFAULT_SOURCE_DIR = os.path.expanduser("~/liquidLapse/heatmap_snapshots")
 DEFAULT_AI_PROCESS_DIR = os.path.expanduser("~/liquidLapse/ai_process")
 DEFAULT_SESSION_NAME = "test1"
+HOUR_WINDOW_SECONDS = 3600  # Configurable hourly window in seconds
 
-# Configure logging for detailed output
+# =============================================================================
+# Logging configuration for detailed output
+# =============================================================================
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # =============================================================================
@@ -74,7 +87,7 @@ def parse_filename(filename):
     try:
         price = float(price_str)
     except ValueError:
-        price = None  # Mark as missing if conversion fails
+        price = None  # Mark as missing if conversion fails (e.g., "NA")
     dt_str = f"{date_str} {time_str.replace('-', ':')}"
     try:
         timestamp = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
@@ -107,6 +120,7 @@ def interpolate_price(index, images_info):
     Interpolate a missing price for the image at a given index using linear interpolation.
     
     Searches for the closest previous and next images with valid prices.
+    If there is no previous valid price (i.e., first image), returns the next valid price.
     
     Args:
         index (int): Index of the image with missing price.
@@ -123,6 +137,9 @@ def interpolate_price(index, images_info):
     next_index = index + 1
     while next_index < len(images_info) and images_info[next_index]['price'] is None:
         next_index += 1
+    if prev_index < 0 and next_index < len(images_info):
+        # No previous price: use next valid price
+        return images_info[next_index]['price']
     if prev_index < 0 or next_index >= len(images_info):
         return None
     prev_info = images_info[prev_index]
@@ -134,36 +151,58 @@ def interpolate_price(index, images_info):
     interpolated_price = prev_info['price'] + (next_info['price'] - prev_info['price']) * (elapsed / total_seconds)
     return interpolated_price
 
-def compute_price_change(current_price, previous_price):
+def compute_change_info(current_price, previous_price):
     """
-    Compute the percentage change between the current and previous prices.
+    Compute the percentage change between current and previous prices.
     
-    The change is formatted without a decimal point.
-    Example: if the change is +2.50%, returns "p0250"; if -0.50%, returns "n0050".
-    If the previous price is None, returns "na".
-    
-    Args:
-        current_price (float): Current price value.
-        previous_price (float): Previous price value.
-        
     Returns:
-        str: Formatted percentage change.
+        dict: {
+            'encoded': A string without decimal points (e.g., "p0342" for +0.342% or "n0050" for -0.050%),
+            'change_percent': A float representing the percentage change (e.g., 0.342 or -0.050)
+        }
+    If previous_price is None, defaults to 0 change.
     """
     if previous_price is None:
-        return "na"
-    change = (current_price - previous_price) / previous_price * 100
-    # Multiply by 100 and format as a 4-digit integer string without decimal point
-    if change >= 0:
-        return f"p{int(round(change * 100)):04d}"
-    else:
-        return f"n{int(round(abs(change) * 100)):04d}"
+        return {"encoded": "p0000", "change_percent": 0.0}
+    change_percent = round((current_price - previous_price) / previous_price * 100, 3)
+    formatted = f"{abs(change_percent):06.3f}"  # e.g. "0.342"
+    encoded = ("p" if change_percent >= 0 else "n") + formatted.replace(".", "")
+    return {"encoded": encoded, "change_percent": change_percent}
+
+def compute_hourly_change(current_info, images_info, current_index, window_seconds=HOUR_WINDOW_SECONDS):
+    """
+    Compute the hourly percentage change for the current image by finding the price 
+    from at least 'window_seconds' (default 3600 seconds) earlier.
+    
+    Args:
+        current_info (dict): Metadata for the current image.
+        images_info (list): List of dictionaries for all images.
+        current_index (int): Index of the current image.
+        window_seconds (int): Time window in seconds (default: 3600 seconds for 1 hour).
+        
+    Returns:
+        float: Hourly percentage change (0 if no earlier image exists).
+    """
+    current_timestamp = current_info['timestamp']
+    # Initialize candidate to None
+    candidate = None
+    # Iterate backwards from current_index-1
+    for i in range(current_index - 1, -1, -1):
+        candidate_info = images_info[i]
+        if (current_timestamp - candidate_info['timestamp']).total_seconds() >= window_seconds:
+            candidate = candidate_info
+            break
+    if candidate is None or candidate['price'] is None:
+        return 0.0
+    hourly_change = round((current_info['price'] - candidate['price']) / candidate['price'] * 100, 3)
+    return hourly_change
 
 def process_images(source_dir, target_session_dir):
     """
     Process all images from the source directory:
       - Parse filenames.
       - Interpolate missing prices.
-      - Compute price changes.
+      - Compute step change (relative to previous valid price) and hourly change.
       - Copy images to the target session's "images" folder with new informative filenames.
       - Collect metadata for each image.
       
@@ -189,7 +228,7 @@ def process_images(source_dir, target_session_dir):
     # Sort images by timestamp
     images_info.sort(key=lambda x: x['timestamp'])
     
-    # Interpolate missing prices
+    # Interpolate missing prices where necessary
     for i, info in enumerate(images_info):
         if info['price'] is None:
             interp_price = interpolate_price(i, images_info)
@@ -203,16 +242,20 @@ def process_images(source_dir, target_session_dir):
         else:
             info['interpolated'] = False
 
-    # Compute price change relative to the previous valid price
+    # Compute step change (relative to previous valid price) and hourly change
     previous_price = None
-    for info in images_info:
-        if previous_price is not None:
-            change_str = compute_price_change(info['price'], previous_price)
-        else:
-            change_str = "na"
-        info['change'] = change_str
+    for i, info in enumerate(images_info):
+        step_change_info = compute_change_info(info['price'], previous_price)
+        info['change'] = step_change_info['encoded']
+        info['change_percent_step'] = step_change_info['change_percent']
+        # Compute hourly change using the current index
+        info['change_percent_hour'] = compute_hourly_change(info, images_info, i, window_seconds=HOUR_WINDOW_SECONDS)
         if info['price'] is not None:
             previous_price = info['price']
+    
+    # Add UNIX timestamp for each image
+    for info in images_info:
+        info['unix_timestamp'] = int(info['timestamp'].timestamp())
     
     # Prepare the target "images" folder within the session folder
     images_target_dir = os.path.join(target_session_dir, "images")
@@ -220,28 +263,50 @@ def process_images(source_dir, target_session_dir):
         shutil.rmtree(images_target_dir)
     os.makedirs(images_target_dir, exist_ok=True)
     
-    # Copy images with new informative names and update metadata
-    for info in images_info:
+    # Copy images with new informative names including an incremental ID and update metadata.
+    # The metadata for each image will have the 'id' field as the first field.
+    new_metadata = []
+    for idx, info in enumerate(images_info, start=1):
+        # Format price: remove decimal point (e.g., 8163.10 becomes "816310")
+        price_str = f"{info['price']:.2f}".replace('.', '')
         new_filename = (
-            f"{info['timestamp'].strftime('%Y%m%d_%H%M%S')}_"
-            f"{info['currency']}_"
-            f"{info['price']:.2f}_"
+            f"{idx}_{info['timestamp'].strftime('%Y%m%d_%H%M%S')}_"
+            f"{info['currency']}_{price_str}_"
             f"{info['change']}"
         )
-        # Remove dot from the price part by replacing the decimal point
-        new_filename = new_filename.replace('.', '')
         target_filepath = os.path.join(images_target_dir, new_filename + ".png")
         shutil.copy2(info['original_filepath'], target_filepath)
+        
+        # Build metadata entry with id as the first field
+        metadata_entry = {
+            "id": idx,
+            "original_filepath": info.get('original_filepath'),
+            "new_filename": new_filename,
+            "target_filepath": target_filepath,
+            "date_str": info.get('date_str'),
+            "time_str": info.get('time_str'),
+            "timestamp": info.get('timestamp').strftime("%Y-%m-%d %H:%M:%S"),
+            "unix_timestamp": info.get('unix_timestamp'),
+            "currency": info.get('currency'),
+            "price": info.get('price'),
+            "change": info.get('change'),
+            "change_percent_step": info.get('change_percent_step'),
+            "change_percent_hour": info.get('change_percent_hour'),
+            "interpolated": info.get('interpolated')
+        }
+        new_metadata.append(metadata_entry)
+        # Update original info dictionary with id and new filename
+        info['id'] = idx
         info['new_filename'] = new_filename
         info['target_filepath'] = target_filepath
     
-    return images_info
+    return new_metadata
 
 def write_metadata_json(metadata, session_dir):
     """
-    Write metadata to a JSON file in the session directory.
+    Write metadata to a JSON file in the session folder.
     
-    The JSON file (dataset_info.json) contains information about each processed image.
+    The JSON file (dataset_info.json) contains detailed information for each processed image.
     If the file exists, it will be replaced.
     
     Args:
@@ -259,10 +324,10 @@ def write_metadata_json(metadata, session_dir):
 
 def main(args):
     """
-    Main function to execute the preprocessing.
+    Main function to execute the preprocessing pipeline.
     
     Global parameters can be modified at the top of the script.
-    Command-line arguments override these global defaults.
+    Command-line arguments override these defaults.
     
     Args:
         args: Parsed command-line arguments.
