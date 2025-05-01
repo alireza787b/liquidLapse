@@ -20,8 +20,10 @@ def read_dataset_info(dataset_file):
 # Function to handle gaps in timestamps
 def handle_gaps(dataset_info):
     timestamps = [entry['timestamp'] for entry in dataset_info]
-    start_time = min(timestamps)
-    end_time = max(timestamps)
+    timestamps.sort()  # Ensure timestamps are in chronological order
+    
+    start_time = timestamps[0]
+    end_time = timestamps[-1]
     
     expected_times = [start_time + timedelta(minutes=i*5) for i in range(len(dataset_info))]
     
@@ -51,6 +53,7 @@ def handle_gaps(dataset_info):
     dataset_info.sort(key=lambda x: x['timestamp'])
     
     return dataset_info
+
 
 # Function to generate sequences
 def generate_sequences(dataset_info):
