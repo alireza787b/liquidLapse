@@ -5,13 +5,15 @@ from shutil import copyfile
 
 # Parameters
 session_name = "test1"
-data_source_path = "../heatmap_snapshots"  # Adjust path as needed
+base_directory = os.path.expanduser("~/liquidLapse")
+data_source_path = os.path.join(base_directory, "heatmap_snapshots")
 sequence_length = 10  # Number of images per sequence
-sequence_folder = f"ai_process/{session_name}/sequences"  # Path to save sequences
+sequence_folder = os.path.join(base_directory, f"ai_process/{session_name}/sequences")
 
 # Function to read dataset information
 def read_dataset_info(dataset_file):
-    with open(dataset_file, 'r') as f:
+    dataset_file_path = os.path.join(base_directory, dataset_file)
+    with open(dataset_file_path, 'r') as f:
         dataset_info = json.load(f)
     return dataset_info
 
@@ -68,29 +70,18 @@ def generate_sequences(dataset_info):
             filename = data_entry['filename']
             if filename:
                 source_image_path = os.path.join(data_source_path, filename)
-                target_image_path = os.path.join(sequence_folder_path, "images", filename)
-                os.makedirs(os.path.dirname(target_image_path), exist_ok=True)
-                copyfile(source_image_path, target_image_path)
-        
-        # Save metadata JSON
-        metadata_file = os.path.join(sequence_folder_path, "metadata.json")
-        with open(metadata_file, 'w') as f:
-            json.dump(sequence_data, f, default=str, indent=4)
+                destination_image_path = os.path.join(sequence_folder_path, "images", filename)
+                try:
+                    copyfile(source_image_path, destination_image_path)
+                except FileNotFoundError:
+                    print(f"Warning: File '{filename}' not found in '{data_source_path}'")
+    
+    print(f"Generated {num_sequences} sequences.")
+    print(f"Saved in: {sequence_folder}")
 
-# Main function
-def main():
-    # Read dataset info
-    dataset_info_file = os.path.join(DEFAULT_AI_PROCESS_DIR, session_name, "dataset_info.json")
-    if not os.path.exists(dataset_info_file):
-        raise FileNotFoundError(f"Dataset info file '{dataset_info_file}' not found.")
-    
-    dataset_info = read_dataset_info(dataset_info_file)
-    
-    # Handle gaps in timestamps
-    dataset_info = handle_gaps(dataset_info)
-    
-    # Generate sequences
-    generate_sequences(dataset_info)
-
+# Example usage
 if __name__ == "__main__":
-    main()
+    dataset_info_file = "ai_process/test1/dataset_info.json"
+    dataset_info = read_dataset_info(dataset_info_file)
+    dataset_info = handle_gaps(dataset_info)
+    generate_sequences(dataset_info)
