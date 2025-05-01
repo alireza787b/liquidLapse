@@ -9,6 +9,7 @@ base_directory = os.path.expanduser("~/liquidLapse")
 data_source_path = os.path.join(base_directory, "heatmap_snapshots")
 sequence_length = 10  # Number of images per sequence
 sequence_folder = os.path.join(base_directory, f"ai_process/{session_name}/sequences")
+sequences_json_path = os.path.join(sequence_folder, "sequences_info.json")
 
 # Function to read dataset information
 def read_dataset_info(dataset_file):
@@ -21,7 +22,6 @@ def read_dataset_info(dataset_file):
         entry['timestamp'] = datetime.strptime(entry['timestamp'], '%Y-%m-%d %H:%M:%S')
     
     return dataset_info
-
 
 # Function to handle gaps in timestamps
 def handle_gaps(dataset_info):
@@ -60,10 +60,10 @@ def handle_gaps(dataset_info):
     
     return dataset_info
 
-
 # Function to generate sequences
 def generate_sequences(dataset_info):
     num_sequences = len(dataset_info) // sequence_length
+    sequences_info = []
     
     for i in range(num_sequences):
         sequence_start = i * sequence_length
@@ -78,23 +78,45 @@ def generate_sequences(dataset_info):
         images_folder_path = os.path.join(sequence_folder_path, "images")
         os.makedirs(images_folder_path, exist_ok=True)
         
-        # Save images (copy from data_source_path to sequence_folder_path/images)
+        # Save images (copy from data_source_path to images_folder_path)
+        sequence_items = []
         for data_entry in sequence_data:
+            original_filepath = data_entry['original_filepath']
             new_filename = data_entry['new_filename']
-            if new_filename:
-                original_filepath = data_entry['original_filepath']
-                target_filepath = os.path.join(images_folder_path, f"{new_filename}.png")
-                
-                # Ensure the target directory exists before copying
-                os.makedirs(os.path.dirname(target_filepath), exist_ok=True)
-                
-                # Copy the image file
-                copyfile(original_filepath, target_filepath)
+            target_filepath = os.path.join(images_folder_path, f"{new_filename}.png")
+            
+            # Copy the image file
+            copyfile(original_filepath, target_filepath)
+            
+            # Store sequence item information
+            sequence_items.append({
+                'filename': new_filename,
+                'price': data_entry['price'],
+                'image_path': target_filepath
+            })
+        
+        # Record sequence information
+        sequence_info = {
+            'sequence_id': i + 1,
+            'start_time': sequence_data[0]['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
+            'end_time': sequence_data[-1]['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
+            'items': sequence_items,
+            'sequence_folder': sequence_folder_path,
+            'session_folder': os.path.join(base_directory, f"ai_process/{session_name}")
+        }
+        sequences_info.append(sequence_info)
+    
+    # Write sequences info to JSON file
+    with open(sequences_json_path, 'w') as json_file:
+        json.dump(sequences_info, json_file, indent=4)
 
-
-# Example usage
+# Main script execution
 if __name__ == "__main__":
-    dataset_info_file = "ai_process/test1/dataset_info.json"
-    dataset_info = read_dataset_info(dataset_info_file)
+    # Read dataset info
+    dataset_info = read_dataset_info(os.path.join("test1", "dataset_info.json"))
+    
+    # Handle gaps in timestamps
     dataset_info = handle_gaps(dataset_info)
+    
+    # Generate sequences and create JSON file with sequences info
     generate_sequences(dataset_info)
