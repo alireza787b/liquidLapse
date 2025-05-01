@@ -1,6 +1,6 @@
 # liquidLapse
 
-**liquidLapse** is a Python automation project that periodically captures snapshots of the CoinGlass liquidation heatmap. Snapshots are saved in a date-organized folder with informative date-time stamps (optionally including the current Bitcoin price), enabling later playback or review.
+**liquidLapse** is a Python automation project that periodically captures snapshots of the CoinGlass liquidation heatmap. Snapshots are saved in a date-organized folder with informative date-time stamps (optionally including the current Bitcoin price), enabling later playback or review. The project now includes advanced sequence processing for AI training pipelines.
 
 ## Features
 
@@ -9,6 +9,14 @@
 
 - **BTC Price Integration:**  
   Optionally appends the current Bitcoin price (fetched from a configurable API URL) to the snapshot filename for added context.
+
+- **AI-Ready Sequence Generation:**  
+  Processes captured snapshots into chronological sequences suitable for AI model training:
+  - Organizes images into fixed-length sequences
+  - Handles timestamp gaps with intelligent interpolation
+  - Tracks price changes across timeframes
+  - Includes future prediction data for supervised learning targets
+  - Maintains references to both original and processed image paths
 
 - **Configurable Settings:**  
   All key settings—including the target URL, snapshot interval, output folder, headless mode, BTC price API URL, and whether to include the BTC price in the filename—are stored in a `config.yaml` file for easy adjustments.
@@ -28,10 +36,19 @@
 liquidLapse/
 ├── config.yaml
 ├── liquidLapse.py
+├── sequence_generator.py     # New script for AI training sequence generation
 ├── requirements.txt
 ├── README.md
 ├── setup.sh
-└── service.sh
+├── service.sh
+└── ai_process/               # Directory for AI processing outputs
+    └── session_name/         # Named session folders
+        ├── dataset_info.json # Dataset metadata
+        ├── images/           # Processed images
+        └── sequences/        # Generated sequences
+            ├── sequences_info.json   # Metadata for all sequences
+            └── sequence_n/   # Individual sequence folders
+                └── images/   # Sequence images
 ```
 
 ## Setup & Usage Instructions
@@ -114,6 +131,26 @@ python liquidLapse.py
 
 Press `Ctrl+C` to terminate the script.
 
+### 6. Generating AI Training Sequences
+
+After collecting snapshots, you can process them into training sequences:
+
+```bash
+source venv/bin/activate
+python sequence_generator.py --session="test1" --length=10
+```
+
+Parameters:
+- `--session`: Name of the processing session (default: "test1")
+- `--length`: Number of images per sequence (default: 10)
+
+The script will:
+1. Process the snapshots in the `heatmap_snapshots` directory
+2. Generate fixed-length sequences with metadata
+3. Include future prediction data for each sequence
+4. Save everything in the `ai_process/[session_name]/sequences` directory
+5. Create a comprehensive `sequences_info.json` file with all metadata
+
 ---
 
 ## Additional Notes
@@ -127,6 +164,13 @@ Press `Ctrl+C` to terminate the script.
 - **Logs & Status:**  
   - Runtime logs are saved to `liquidLapseService.log`.  
   - The status file (`liquidLapseService.status`) is updated each snapshot cycle with details such as the last execution time and the snapshot interval.
+
+- **AI Training Pipeline Integration:**  
+  The sequence generation feature creates structured data ready for machine learning model training:
+  - Each sequence contains a series of chronological snapshots
+  - Price change data is included for both the sequence and prediction targets
+  - All data is structured in JSON format for easy consumption by ML frameworks
+  - Paths to both original and processed images are maintained for flexibility
 
 ---
 
