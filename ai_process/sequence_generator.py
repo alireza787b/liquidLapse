@@ -92,7 +92,8 @@ def generate_sequences(dataset_info):
             sequence_items.append({
                 'filename': new_filename,
                 'price': data_entry['price'],
-                'image_path': target_filepath
+                'image_path': target_filepath,
+                'original_path': data_entry.get('target_filepath')  # Path from dataset source
             })
         
         # Record sequence information
@@ -125,6 +126,10 @@ def generate_sequences(dataset_info):
                 
                 if 'new_filename' in future_entry:
                     sequence_info['future_prediction']['filename'] = future_entry['new_filename']
+                
+                # Add image paths for the future prediction if available
+                if 'target_filepath' in future_entry:
+                    sequence_info['future_prediction']['original_path'] = future_entry['target_filepath']
         
         sequences_info.append(sequence_info)
     
