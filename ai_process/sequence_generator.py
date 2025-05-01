@@ -52,65 +52,58 @@ def handle_gaps(dataset_info):
             dataset_info.append({
                 'filename': None,  # Placeholder for missing filename
                 'timestamp': time,
-                # Add other necessary fields here
+                'future_action': None  # Placeholder for future action
             })
     
+    dataset_info.sort(key=lambda x: x['timestamp'])  # Sort by timestamp
     return dataset_info
 
-# Function to generate sequences and update sequences JSON
+# Function to generate sequences and update sequences_info.json
 def generate_sequences(dataset_info):
     if not os.path.exists(sequence_folder):
         os.makedirs(sequence_folder)
     
-    sequences = []
+    sequences_info = []
+    sequence_counter = 1
+    
     for i in range(0, len(dataset_info), sequence_length):
-        sequence_items = dataset_info[i:i + sequence_length]
+        sequence_entries = dataset_info[i:i+sequence_length]
         
-        # Gather information for the sequence
-        sequence_start_time = sequence_items[0]['timestamp']
-        sequence_end_time = sequence_items[-1]['timestamp']
-        future_action = get_future_action(sequence_end_time)  # Function to get future action
+        # Determine future action for the sequence
+        future_action = None
+        if i + sequence_length < len(dataset_info):
+            future_action = dataset_info[i + sequence_length]['change_percent_step']
         
-        # Create sequence folder if not exists
-        sequence_folder_path = os.path.join(sequence_folder, f"sequence_{i // sequence_length + 1}")
+        # Generate sequence folder
+        sequence_folder_path = os.path.join(sequence_folder, f"sequence_{sequence_counter}")
         if not os.path.exists(sequence_folder_path):
             os.makedirs(sequence_folder_path)
         
-        # Copy images and update dataset_info with paths
-        for item in sequence_items:
-            original_filepath = item['original_filepath']
-            filename = os.path.basename(original_filepath)
-            target_filepath = os.path.join(sequence_folder_path, filename)
+        # Copy images and update sequences_info
+        for data_entry in sequence_entries:
+            filename = data_entry['new_filename']
+            original_filepath = data_entry['original_filepath']
+            target_filepath = os.path.join(sequence_folder_path, f"{filename}.png")
             
-            # Copy image to sequence folder
             copyfile(original_filepath, target_filepath)
             
-            # Update dataset_info with target filepath
-            item['target_filepath'] = target_filepath
+            # Add entry to sequences_info
+            sequences_info.append({
+                'id': data_entry['id'],
+                'start_time': data_entry['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
+                'end_time': (data_entry['timestamp'] + timedelta(minutes=(sequence_length-1)*5)).strftime('%Y-%m-%d %H:%M:%S'),
+                'items': data_entry['new_filename'],
+                'prices': data_entry['price'],
+                'path_to_image': target_filepath,
+                'session_folder_paths': sequence_folder_path,
+                'future_action': future_action
+            })
         
-        # Add sequence information to sequences list
-        sequences.append({
-            'id': i // sequence_length + 1,
-            'start_time': sequence_start_time.strftime('%Y-%m-%d %H:%M:%S'),
-            'end_time': sequence_end_time.strftime('%Y-%m-%d %H:%M:%S'),
-            'items': [item['filename'] for item in sequence_items],
-            'prices': [item['price'] for item in sequence_items],
-            'path_to_images': [item['target_filepath'] for item in sequence_items],
-            'future_action': future_action,  # Add future action here
-        })
+        sequence_counter += 1
     
-    # Save sequences information to JSON
-    with open(sequences_json_path, 'w') as json_file:
-        json.dump(sequences, json_file, indent=4)
-
-# Function to get future action based on the end time of the sequence
-def get_future_action(end_time):
-    # Example function to get future action, replace with your logic
-    future_action = {
-        'timestamp': end_time + timedelta(minutes=5),  # Example: Next timestamp after 5 minutes
-        'percent_change': 0.5  # Example: Positive or negative percent change
-    }
-    return future_action
+    # Write sequences_info to sequences_json_path
+    with open(sequences_json_path, 'w') as f:
+        json.dump(sequences_info, f, indent=4)
 
 # Main script execution
 if __name__ == "__main__":
