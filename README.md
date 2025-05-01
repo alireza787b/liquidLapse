@@ -137,12 +137,12 @@ After collecting snapshots, you can process them into training sequences:
 
 ```bash
 source venv/bin/activate
-python sequence_generator.py --session="test1" --length=10
+python sequence_generator.py
 ```
 
 Parameters:
-- `--session`: Name of the processing session (default: "test1")
-- `--length`: Number of images per sequence (default: 10)
+- `session_name`: Name of the processing session (default: "test1")
+- `session_length`: Number of images per sequence (default: 10)
 
 The script will:
 1. Process the snapshots in the `heatmap_snapshots` directory
