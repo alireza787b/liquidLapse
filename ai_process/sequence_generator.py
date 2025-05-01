@@ -52,71 +52,68 @@ def handle_gaps(dataset_info):
             dataset_info.append({
                 'filename': None,  # Placeholder for missing filename
                 'timestamp': time,
-                'id': None,        # Placeholder for ID or other necessary data
-                # Add other required fields as needed
+                # Add other necessary fields here
             })
-    
-    # Sort dataset_info again after interpolation
-    dataset_info.sort(key=lambda x: x['timestamp'])
     
     return dataset_info
 
-# Function to generate sequences
+# Function to generate sequences and update sequences JSON
 def generate_sequences(dataset_info):
-    sequences_info = []
+    if not os.path.exists(sequence_folder):
+        os.makedirs(sequence_folder)
     
+    sequences = []
     for i in range(0, len(dataset_info), sequence_length):
-        sequence_data = dataset_info[i:i + sequence_length]
+        sequence_items = dataset_info[i:i + sequence_length]
         
-        # Ensure sequence_data has at least sequence_length entries
-        if len(sequence_data) < sequence_length:
-            continue
+        # Gather information for the sequence
+        sequence_start_time = sequence_items[0]['timestamp']
+        sequence_end_time = sequence_items[-1]['timestamp']
+        future_action = get_future_action(sequence_end_time)  # Function to get future action
         
-        # Determine future market action as the target for this sequence
-        future_action = determine_future_action(dataset_info, i + sequence_length)
+        # Create sequence folder if not exists
+        sequence_folder_path = os.path.join(sequence_folder, f"sequence_{i // sequence_length + 1}")
+        if not os.path.exists(sequence_folder_path):
+            os.makedirs(sequence_folder_path)
         
-        # Generate sequence folder
-        sequence_folder_path = os.path.join(sequence_folder, f"sequence_{i + 1}")
-        os.makedirs(sequence_folder_path, exist_ok=True)
-        
-        # Copy images to sequence folder and collect metadata
-        sequence_metadata = {
-            'id': i + 1,
-            'start_time': sequence_data[0]['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
-            'end_time': sequence_data[-1]['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
-            'items': [data_entry.get('filename', '') for data_entry in sequence_data],
-            'prices': [data_entry['price'] for data_entry in sequence_data],
-            'sequence_folder': sequence_folder_path,
-            'future_action': future_action  # Add future market action as target
-        }
-        
-        sequences_info.append(sequence_metadata)
-        
-        # Copy files to sequence folder
-        for data_entry in sequence_data:
-            original_filepath = data_entry['original_filepath']
+        # Copy images and update dataset_info with paths
+        for item in sequence_items:
+            original_filepath = item['original_filepath']
             filename = os.path.basename(original_filepath)
             target_filepath = os.path.join(sequence_folder_path, filename)
+            
+            # Copy image to sequence folder
             copyfile(original_filepath, target_filepath)
+            
+            # Update dataset_info with target filepath
+            item['target_filepath'] = target_filepath
         
-    # Save sequences info to JSON
-    with open(sequences_json_path, 'w') as f:
-        json.dump(sequences_info, f, indent=4)
+        # Add sequence information to sequences list
+        sequences.append({
+            'id': i // sequence_length + 1,
+            'start_time': sequence_start_time.strftime('%Y-%m-%d %H:%M:%S'),
+            'end_time': sequence_end_time.strftime('%Y-%m-%d %H:%M:%S'),
+            'items': [item['filename'] for item in sequence_items],
+            'prices': [item['price'] for item in sequence_items],
+            'path_to_images': [item['target_filepath'] for item in sequence_items],
+            'future_action': future_action,  # Add future action here
+        })
+    
+    # Save sequences information to JSON
+    with open(sequences_json_path, 'w') as json_file:
+        json.dump(sequences, json_file, indent=4)
 
-def determine_future_action(dataset_info, index):
-    if index < len(dataset_info):
-        future_entry = dataset_info[index]
-        # Example: Extract the future market action or value as needed
-        return future_entry['change_percent_step']  # Adjust as per your dataset structure
-    else:
-        return None  # Handle cases where future action is not available
+# Function to get future action based on the end time of the sequence
+def get_future_action(end_time):
+    # Example function to get future action, replace with your logic
+    future_action = {
+        'timestamp': end_time + timedelta(minutes=5),  # Example: Next timestamp after 5 minutes
+        'percent_change': 0.5  # Example: Positive or negative percent change
+    }
+    return future_action
 
+# Main script execution
 if __name__ == "__main__":
-    # Read dataset information
-    dataset_info = read_dataset_info(os.path.join("ai_process","test1", "dataset_info.json"))
-    
-    # Handle gaps in timestamps
+    dataset_info = read_dataset_info(os.path.join(session_name, "dataset_info.json"))
     dataset_info = handle_gaps(dataset_info)
-    
-    # Generate sequences and save metadata
     generate_sequences(dataset_info)
