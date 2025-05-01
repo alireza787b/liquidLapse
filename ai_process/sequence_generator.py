@@ -15,7 +15,13 @@ def read_dataset_info(dataset_file):
     dataset_file_path = os.path.join(base_directory, dataset_file)
     with open(dataset_file_path, 'r') as f:
         dataset_info = json.load(f)
+    
+    # Convert timestamp strings to datetime objects
+    for entry in dataset_info:
+        entry['timestamp'] = datetime.strptime(entry['timestamp'], '%Y-%m-%d %H:%M:%S')
+    
     return dataset_info
+
 
 # Function to handle gaps in timestamps
 def handle_gaps(dataset_info):
