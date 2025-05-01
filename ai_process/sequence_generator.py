@@ -76,17 +76,12 @@ def generate_sequences(dataset_info):
         
         # Save images (copy from data_source_path to sequence_folder_path/images)
         for data_entry in sequence_data:
-            filename = data_entry['filename']
-            if filename:
-                source_image_path = os.path.join(data_source_path, filename)
-                destination_image_path = os.path.join(sequence_folder_path, "images", filename)
-                try:
-                    copyfile(source_image_path, destination_image_path)
-                except FileNotFoundError:
-                    print(f"Warning: File '{filename}' not found in '{data_source_path}'")
-    
-    print(f"Generated {num_sequences} sequences.")
-    print(f"Saved in: {sequence_folder}")
+            new_filename = data_entry['new_filename']  # Corrected field name
+            if new_filename:
+                original_filepath = data_entry['original_filepath']
+                target_filepath = os.path.join(sequence_folder_path, "images", f"{new_filename}.png")
+                copyfile(original_filepath, target_filepath)
+
 
 # Example usage
 if __name__ == "__main__":
