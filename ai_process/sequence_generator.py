@@ -106,7 +106,7 @@ def generate_sequences(dataset_info):
 # Main script execution
 if __name__ == "__main__":
     # Read dataset information
-    dataset_info = read_dataset_info(os.path.join(session_name, "dataset_info.json"))
+    dataset_info = read_dataset_info(os.path.join("ai_process",session_name, "dataset_info.json"))
     
     # Handle gaps in timestamps
     dataset_info = handle_gaps(dataset_info)
