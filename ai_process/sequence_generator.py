@@ -52,71 +52,64 @@ def handle_gaps(dataset_info):
             dataset_info.append({
                 'filename': None,  # Placeholder for missing filename
                 'timestamp': time,
-                'price': None  # Placeholder for missing price
+                'id': None,        # Placeholder for ID or other necessary data
+                # Add other required fields as needed
             })
     
-    # Sort dataset_info by timestamp again
+    # Sort dataset_info again after interpolation
     dataset_info.sort(key=lambda x: x['timestamp'])
     
     return dataset_info
 
-# Function to generate sequences
+# Function to generate sequences and update JSON metadata
 def generate_sequences(dataset_info):
-    num_sequences = len(dataset_info) // sequence_length
     sequences_info = []
+    num_sequences = len(dataset_info) // sequence_length
     
     for i in range(num_sequences):
-        sequence_start = i * sequence_length
-        sequence_end = sequence_start + sequence_length
-        sequence_data = dataset_info[sequence_start:sequence_end]
+        sequence_data = dataset_info[i * sequence_length : (i + 1) * sequence_length]
         
-        # Create sequence folder
-        sequence_folder_path = os.path.join(sequence_folder, f"sequence_{i+1}")
+        # Generate sequence folder path
+        sequence_folder_path = os.path.join(sequence_folder, f"sequence_{i + 1}")
         os.makedirs(sequence_folder_path, exist_ok=True)
         
-        # Create images folder within sequence folder
-        images_folder_path = os.path.join(sequence_folder_path, "images")
-        os.makedirs(images_folder_path, exist_ok=True)
-        
-        # Save images (copy from data_source_path to images_folder_path)
-        sequence_items = []
+        # Copy images to sequence folder
         for data_entry in sequence_data:
             original_filepath = data_entry['original_filepath']
-            new_filename = data_entry['new_filename']
-            target_filepath = os.path.join(images_folder_path, f"{new_filename}.png")
-            
-            # Copy the image file
+            target_filepath = os.path.join(sequence_folder_path, os.path.basename(data_entry['target_filepath']))
             copyfile(original_filepath, target_filepath)
             
-            # Store sequence item information
-            sequence_items.append({
-                'filename': new_filename,
-                'price': data_entry['price'],
-                'image_path': target_filepath
-            })
+        # Calculate future action after the sequence
+        future_action = None
+        if (i + 1) * sequence_length < len(dataset_info):
+            next_data_entry = dataset_info[(i + 1) * sequence_length]
+            future_action = next_data_entry['change_percent_step']  # Adjust as per your data structure
         
-        # Record sequence information
+        # Prepare sequence metadata
         sequence_info = {
-            'sequence_id': i + 1,
+            'id': i + 1,
             'start_time': sequence_data[0]['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
             'end_time': sequence_data[-1]['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
-            'items': sequence_items,
-            'sequence_folder': sequence_folder_path,
-            'session_folder': os.path.join(base_directory, f"ai_process/{session_name}")
+            'items': [data_entry['filename'] for data_entry in sequence_data],
+            'prices': [data_entry['price'] for data_entry in sequence_data],
+            'path_to_images': [os.path.abspath(os.path.join(sequence_folder_path, os.path.basename(data_entry['target_filepath']))) for data_entry in sequence_data],
+            'future_action': future_action,
+            # Add any other required fields
         }
+        
         sequences_info.append(sequence_info)
     
-    # Write sequences info to JSON file
-    with open(sequences_json_path, 'w') as json_file:
-        json.dump(sequences_info, json_file, indent=4)
+    # Write sequences metadata to JSON file
+    with open(sequences_json_path, 'w') as f:
+        json.dump(sequences_info, f, indent=4)
 
 # Main script execution
 if __name__ == "__main__":
-    # Read dataset info
-    dataset_info = read_dataset_info(os.path.join("ai_process","test1", "dataset_info.json"))
+    # Read dataset information
+    dataset_info = read_dataset_info(os.path.join(session_name, "dataset_info.json"))
     
     # Handle gaps in timestamps
     dataset_info = handle_gaps(dataset_info)
     
-    # Generate sequences and create JSON file with sequences info
+    # Generate sequences and update JSON metadata
     generate_sequences(dataset_info)
