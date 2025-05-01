@@ -64,45 +64,33 @@ def generate_sequences(dataset_info):
         os.makedirs(sequence_folder_path, exist_ok=True)
         
         # Save images (copy from data_source_path to sequence_folder_path/images)
-        for entry in sequence_data:
-            # Copy or move images based on actual implementation needs
-            # Here, I assume copying images for demonstration
-            if entry['filename'] is not None:
-                source_image_path = os.path.join(data_source_path, entry['filename'])
-                target_image_path = os.path.join(sequence_folder_path, "images", entry['filename'])
+        for data_entry in sequence_data:
+            filename = data_entry['filename']
+            if filename:
+                source_image_path = os.path.join(data_source_path, filename)
+                target_image_path = os.path.join(sequence_folder_path, "images", filename)
                 os.makedirs(os.path.dirname(target_image_path), exist_ok=True)
                 copyfile(source_image_path, target_image_path)
         
-        # Create sequence metadata json file
-        sequence_info = {
-            'sequence_id': i + 1,
-            'start_timestamp': sequence_data[0]['timestamp'].isoformat(),
-            'end_timestamp': sequence_data[-1]['timestamp'].isoformat(),
-            'length': len(sequence_data),
-            'images_folder': os.path.join(sequence_folder_path, "images"),
-            'metadata_file': os.path.join(sequence_folder_path, "sequence_info.json")
-        }
-        
-        with open(sequence_info['metadata_file'], 'w') as f:
-            json.dump(sequence_info, f, indent=4)
-        
-        print(f"Sequence {i+1} generated successfully.")
+        # Save metadata JSON
+        metadata_file = os.path.join(sequence_folder_path, "metadata.json")
+        with open(metadata_file, 'w') as f:
+            json.dump(sequence_data, f, default=str, indent=4)
 
-# Main function to orchestrate sequence generation process
+# Main function
 def main():
-    # Ensure sequences folder exists
-    os.makedirs(sequence_folder, exist_ok=True)
+    # Read dataset info
+    dataset_info_file = os.path.join(DEFAULT_AI_PROCESS_DIR, session_name, "dataset_info.json")
+    if not os.path.exists(dataset_info_file):
+        raise FileNotFoundError(f"Dataset info file '{dataset_info_file}' not found.")
     
-    # Read and preprocess dataset information
-    dataset_info_file = os.path.join(sequence_folder, "dataset_info.json")
     dataset_info = read_dataset_info(dataset_info_file)
     
-    # Handle gaps in dataset
+    # Handle gaps in timestamps
     dataset_info = handle_gaps(dataset_info)
     
     # Generate sequences
     generate_sequences(dataset_info)
 
-# Entry point of the script
 if __name__ == "__main__":
     main()
