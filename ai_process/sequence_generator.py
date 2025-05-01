@@ -1,5 +1,3 @@
-
-
 import os
 import json
 from datetime import datetime, timedelta
@@ -106,6 +104,28 @@ def generate_sequences(dataset_info):
             'sequence_folder': sequence_folder_path,
             'session_folder': os.path.join(base_directory, f"ai_process/{session_name}")
         }
+        
+        # Add future prediction if available
+        future_index = sequence_end
+        if future_index < len(dataset_info):
+            future_entry = dataset_info[future_index]
+            
+            # Check if future entry has required fields
+            if 'change_percent_step' in future_entry and 'change_percent_hour' in future_entry:
+                sequence_info['future_prediction'] = {
+                    'timestamp': future_entry['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
+                    'price': future_entry['price'],
+                    'change_percent_step': future_entry['change_percent_step'],
+                    'change_percent_hour': future_entry['change_percent_hour']
+                }
+            
+                # Optionally, add additional future data if needed
+                if 'change' in future_entry:
+                    sequence_info['future_prediction']['change'] = future_entry['change']
+                
+                if 'new_filename' in future_entry:
+                    sequence_info['future_prediction']['filename'] = future_entry['new_filename']
+        
         sequences_info.append(sequence_info)
     
     # Write sequences info to JSON file
