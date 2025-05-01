@@ -1,3 +1,5 @@
+
+
 import os
 import json
 from datetime import datetime, timedelta
@@ -52,61 +54,71 @@ def handle_gaps(dataset_info):
             dataset_info.append({
                 'filename': None,  # Placeholder for missing filename
                 'timestamp': time,
-                'future_action': None  # Placeholder for future action
+                'price': None  # Placeholder for missing price
             })
     
-    dataset_info.sort(key=lambda x: x['timestamp'])  # Sort by timestamp
+    # Sort dataset_info by timestamp again
+    dataset_info.sort(key=lambda x: x['timestamp'])
+    
     return dataset_info
 
-# Function to generate sequences and update sequences_info.json
+# Function to generate sequences
 def generate_sequences(dataset_info):
-    if not os.path.exists(sequence_folder):
-        os.makedirs(sequence_folder)
-    
+    num_sequences = len(dataset_info) // sequence_length
     sequences_info = []
-    sequence_counter = 1
     
-    for i in range(0, len(dataset_info), sequence_length):
-        sequence_entries = dataset_info[i:i+sequence_length]
+    for i in range(num_sequences):
+        sequence_start = i * sequence_length
+        sequence_end = sequence_start + sequence_length
+        sequence_data = dataset_info[sequence_start:sequence_end]
         
-        # Determine future action for the sequence
-        future_action = None
-        if i + sequence_length < len(dataset_info):
-            future_action = dataset_info[i + sequence_length]['change_percent_step']
+        # Create sequence folder
+        sequence_folder_path = os.path.join(sequence_folder, f"sequence_{i+1}")
+        os.makedirs(sequence_folder_path, exist_ok=True)
         
-        # Generate sequence folder
-        sequence_folder_path = os.path.join(sequence_folder, f"sequence_{sequence_counter}")
-        if not os.path.exists(sequence_folder_path):
-            os.makedirs(sequence_folder_path)
+        # Create images folder within sequence folder
+        images_folder_path = os.path.join(sequence_folder_path, "images")
+        os.makedirs(images_folder_path, exist_ok=True)
         
-        # Copy images and update sequences_info
-        for data_entry in sequence_entries:
-            filename = data_entry['new_filename']
+        # Save images (copy from data_source_path to images_folder_path)
+        sequence_items = []
+        for data_entry in sequence_data:
             original_filepath = data_entry['original_filepath']
-            target_filepath = os.path.join(sequence_folder_path, f"{filename}.png")
+            new_filename = data_entry['new_filename']
+            target_filepath = os.path.join(images_folder_path, f"{new_filename}.png")
             
+            # Copy the image file
             copyfile(original_filepath, target_filepath)
             
-            # Add entry to sequences_info
-            sequences_info.append({
-                'id': data_entry['id'],
-                'start_time': data_entry['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
-                'end_time': (data_entry['timestamp'] + timedelta(minutes=(sequence_length-1)*5)).strftime('%Y-%m-%d %H:%M:%S'),
-                'items': data_entry['new_filename'],
-                'prices': data_entry['price'],
-                'path_to_image': target_filepath,
-                'session_folder_paths': sequence_folder_path,
-                'future_action': future_action
+            # Store sequence item information
+            sequence_items.append({
+                'filename': new_filename,
+                'price': data_entry['price'],
+                'image_path': target_filepath
             })
         
-        sequence_counter += 1
+        # Record sequence information
+        sequence_info = {
+            'sequence_id': i + 1,
+            'start_time': sequence_data[0]['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
+            'end_time': sequence_data[-1]['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
+            'items': sequence_items,
+            'sequence_folder': sequence_folder_path,
+            'session_folder': os.path.join(base_directory, f"ai_process/{session_name}")
+        }
+        sequences_info.append(sequence_info)
     
-    # Write sequences_info to sequences_json_path
-    with open(sequences_json_path, 'w') as f:
-        json.dump(sequences_info, f, indent=4)
+    # Write sequences info to JSON file
+    with open(sequences_json_path, 'w') as json_file:
+        json.dump(sequences_info, json_file, indent=4)
 
 # Main script execution
 if __name__ == "__main__":
-    dataset_info = read_dataset_info(os.path.join("ai_process",session_name, "dataset_info.json"))
+    # Read dataset info
+    dataset_info = read_dataset_info(os.path.join("ai_process","test1", "dataset_info.json"))
+    
+    # Handle gaps in timestamps
     dataset_info = handle_gaps(dataset_info)
+    
+    # Generate sequences and create JSON file with sequences info
     generate_sequences(dataset_info)
