@@ -114,6 +114,6 @@ def get_future_action(end_time):
 
 # Main script execution
 if __name__ == "__main__":
-    dataset_info = read_dataset_info(os.path.join(session_name, "dataset_info.json"))
+    dataset_info = read_dataset_info(os.path.join("ai_process",session_name, "dataset_info.json"))
     dataset_info = handle_gaps(dataset_info)
     generate_sequences(dataset_info)
