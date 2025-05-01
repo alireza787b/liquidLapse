@@ -74,12 +74,21 @@ def generate_sequences(dataset_info):
         sequence_folder_path = os.path.join(sequence_folder, f"sequence_{i+1}")
         os.makedirs(sequence_folder_path, exist_ok=True)
         
+        # Create images folder within sequence folder
+        images_folder_path = os.path.join(sequence_folder_path, "images")
+        os.makedirs(images_folder_path, exist_ok=True)
+        
         # Save images (copy from data_source_path to sequence_folder_path/images)
         for data_entry in sequence_data:
-            new_filename = data_entry['new_filename']  # Corrected field name
+            new_filename = data_entry['new_filename']
             if new_filename:
                 original_filepath = data_entry['original_filepath']
-                target_filepath = os.path.join(sequence_folder_path, "images", f"{new_filename}.png")
+                target_filepath = os.path.join(images_folder_path, f"{new_filename}.png")
+                
+                # Ensure the target directory exists before copying
+                os.makedirs(os.path.dirname(target_filepath), exist_ok=True)
+                
+                # Copy the image file
                 copyfile(original_filepath, target_filepath)
 
 
