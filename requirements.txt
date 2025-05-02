@@ -9,5 +9,5 @@ tensorboard>=2.16     # graph & metric visualisation
 
 # already present in your file
 selenium
-webdriver‑manager
+webdriver-manager
 PyYAML
