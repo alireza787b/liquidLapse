@@ -1,3 +1,13 @@
+# deep‑learning stack
+torch>=2.2
+torchvision>=0.17
+
+# data / utils
+Pillow>=10.2          # for image loading
+torchinfo>=1.8        # lightweight model summary (optional but handy)
+tensorboard>=2.16     # graph & metric visualisation
+
+# already present in your file
 selenium
-webdriver-manager
+webdriver‑manager
 PyYAML
