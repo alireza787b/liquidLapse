@@ -1,94 +1,96 @@
 #!/usr/bin/env bash
 # push_model.sh
 #
-# Interactive script to select a trained model run locally and rsync it
-# up to a remote VPS. Defaults to the latest training run under
-# ai_process/<session>/train_*/best_model.pt, but lets you override.
-#
-# Usage: ./push_model.sh
+# Interactive script (run locally) to select a trained model run and
+# rsync its best_model.pt up to your VPS.
 
 set -euo pipefail
 IFS=$'\n\t'
 
-# ──────── Defaults ────────
+# ─────────── CONFIGURATION DEFAULTS ───────────
 DEFAULT_SESSION="test1"
-LOCAL_BASE="${HOME}/liquidLapse/ai_process"
+LOCAL_BASE_DIR="${HOME}/liquidLapse/ai_process"
 SSH_KEY="${HOME}/.ssh/id_rsa"
-REMOTE_DEFAULT="root@nb1.joomtalk.ir"
-REMOTE_BASE_DIR="~/liquidLapse/ai_process"
-# ──────────────────────────
+DEFAULT_REMOTE="root@nb1.joomtalk.ir"
+# Remote target base: ~/liquidLapse/ai_process/<session>
+# ───────────────────────────────────────────────
 
-# Colors
+# Color codes
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
-# ──────── Utility Functions ────────
-err() { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
-info() { echo -e "${GREEN}[INFO]${NC} $*"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
+# ─────────── Utility Functions ───────────
+err()   { echo -e "${RED}[ERROR]   $*${NC}" >&2;  exit 1; }
+info()  { echo -e "${GREEN}[INFO]    $*${NC}"; }
+warn()  { echo -e "${YELLOW}[WARNING] $*${NC}"; }
 
 prompt() {
-  local name="$1" def="$2" msg="$3"
-  echo -ne "${YELLOW}$msg${NC} [${def}]: "
-  read -r reply
-  echo "${reply:-$def}"
+  # prompt <varname> <default> <message>
+  local var="$1"; local def="$2"; shift 2
+  read -rp "$* [$def]: " val
+  printf -v "$var" '%s' "${val:-$def}"
 }
 
-# ──────── Script Start ────────
-echo -e "${GREEN}--- Push Trained Model Script ---${NC}"
+check_ssh() {
+  ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 "$1" exit \
+    &>/dev/null || return 1
+  return 0
+}
+# ────────────────────────────────────────
 
-# 1) Choose session
-SESSION=$(prompt SESSION "$DEFAULT_SESSION" \
-  "Enter session name (subfolder under ai_process)")
-LOCAL_SESSION_DIR="${LOCAL_BASE}/${SESSION}"
-[[ -d "$LOCAL_SESSION_DIR" ]] || err "Session dir not found: $LOCAL_SESSION_DIR"
+echo -e "${GREEN}=== Push Trained Model to VPS ===${NC}"
 
-# 2) List train_* runs
-MAPFILE -t RUN_DIRS < <(find "$LOCAL_SESSION_DIR" -maxdepth 1 -type d -name 'train_*' | sort)
-if [[ ${#RUN_DIRS[@]} -eq 0 ]]; then
-  err "No train_* directories in $LOCAL_SESSION_DIR"
+# 1) Session
+prompt SESSION "$DEFAULT_SESSION" "Enter AI-process session name"
+LOCAL_SESSION="${LOCAL_BASE_DIR}/${SESSION}"
+[[ -d "$LOCAL_SESSION" ]] || err "Session directory not found: $LOCAL_SESSION"
+
+# 2) List available train_* runs (sorted newest first)
+mapfile -t RUNS < <(find "$LOCAL_SESSION" -maxdepth 1 -type d -name 'train_*' \
+                    -printf '%T@ %p\n' | sort -nr | cut -d' ' -f2)
+if [[ ${#RUNS[@]} -eq 0 ]]; then
+  err "No training runs (train_*) found under $LOCAL_SESSION"
 fi
 
 echo "Available training runs:"
-for i in "${!RUN_DIRS[@]}"; do
-  run=$(basename "${RUN_DIRS[$i]}")
-  echo "  [$((i+1))] $run"
+for idx in "${!RUNS[@]}"; do
+  echo "  $((idx+1))) $(basename "${RUNS[$idx]}")"
 done
 
-# Default to last (newest)
-DEFAULT_IDX=${#RUN_DIRS[@]}
-IDX=$(prompt IDX "$DEFAULT_IDX" \
-  "Select run by number (1–${#RUN_DIRS[@]})")
-if ! [[ "$IDX" =~ ^[0-9]+$ ]] || (( IDX<1 || IDX> ${#RUN_DIRS[@]} )); then
-  err "Invalid selection"
-fi
-SELECTED_RUN="${RUN_DIRS[$((IDX-1))]}"
+default_idx=1
+prompt CHOICE "$default_idx" "Select run by number"
+[[ "$CHOICE" =~ ^[0-9]+$ ]] || err "Invalid selection"
+(( CHOICE>=1 && CHOICE<=${#RUNS[@]} )) || err "Selection out of range"
+
+SELECTED_RUN="${RUNS[$((CHOICE-1))]}"
 MODEL_PATH="${SELECTED_RUN}/best_model.pt"
 [[ -f "$MODEL_PATH" ]] || err "Model file not found: $MODEL_PATH"
-info "Selected model: $(basename "$SELECTED_RUN")/best_model.pt"
 
-# 3) Get remote info
-REMOTE=$(prompt REMOTE "$REMOTE_DEFAULT" \
-  "Enter remote user@host")
-REMOTE_DIR=$(prompt REMDIR "$REMOTE_BASE_DIR/$SESSION" \
-  "Enter remote ai_process/session dir")
+info "Chosen model: $(basename "$SELECTED_RUN")/best_model.pt"
 
-# 4) Verify SSH connectivity
-echo -n "Checking SSH connectivity to $REMOTE... "
-ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 "$REMOTE" "echo ok" \
-  &>/dev/null || err "SSH to $REMOTE failed"
-echo -e "${GREEN}OK${NC}"
+# 3) Remote server & path
+prompt REMOTE "$DEFAULT_REMOTE" "Enter remote server (user@host)"
+prompt REMOTE_BASE "~/liquidLapse/ai_process/${SESSION}" \
+       "Enter remote base directory for session"
+
+# 4) Test SSH connectivity
+echo -n "Testing SSH to $REMOTE ... "
+if check_ssh "$REMOTE"; then
+  echo -e "${GREEN}OK${NC}"
+else
+  err "SSH connection to $REMOTE failed"
+fi
 
 # 5) Ensure remote directory exists
-echo -n "Ensuring remote directory $REMOTE_DIR exists... "
-ssh -i "$SSH_KEY" "$REMOTE" "mkdir -p $REMOTE_DIR" \
+echo -n "Ensuring remote dir $REMOTE_BASE exists ... "
+ssh -i "$SSH_KEY" "$REMOTE" "mkdir -p \"$REMOTE_BASE\"" \
   && echo -e "${GREEN}Done${NC}"
 
-# 6) Transfer model via rsync
-info "Pushing best_model.pt to $REMOTE:$REMOTE_DIR/"
+# 6) Rsync the model
+info "Syncing $MODEL_PATH → $REMOTE:$REMOTE_BASE/"
 rsync -avz \
   -e "ssh -i $SSH_KEY" \
   "$MODEL_PATH" \
-  "$REMOTE":"$REMOTE_DIR"/
-info "Model pushed successfully."
+  "$REMOTE":"$REMOTE_BASE"/
 
-echo -e "${GREEN}All done!${NC}"
+info "Upload complete."
+
