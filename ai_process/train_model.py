@@ -6,7 +6,7 @@ Author: Alireza Ghaderi • 2025-05-02
 
 # ╭────────────────── GLOBAL CONFIG (edit here) ──────────────────╮
 SESSION_NAME        = "test1"               # which processed session to use
-BACKBONE_NAME       = "resnet18"            # torchvision.models.<name>
+BACKBONE_NAME       = "inception_v3"            # torchvision.models.<name>
 FREEZE_BACKBONE     = True                  # True = freeze CNN weights
 LSTM_HIDDEN         = 128                   # hidden size of LSTM
 LSTM_LAYERS         = 1                     # number of stacked LSTM layers
