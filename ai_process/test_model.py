@@ -2,21 +2,27 @@
 """
 test_model.py
 
-Inference script that builds a sequence from the last N raw snapshots
-and predicts the next-step percentage change using a trained CNN→LSTM model.
+Inference on raw heatmap snapshots using the latest (or specified) trained model.
+By default, it:
+  • Uses the most recent best_model.pt under ai_process/<session>/train_*/
+  • Uses the latest heatmap in heatmap_snapshots as the final frame
+  • Grabs the preceding N_FRAMES-1 snapshots
+  • Predicts next-step % change
+
+You can override via command-line arguments.
 """
-import os, re, glob, argparse, torch, json
+import os, re, glob, argparse, sys, torch
 from datetime import datetime
 from torchvision import models, transforms
 from PIL import Image
 import torch.nn as nn
 
-# ╭──────────────────── GLOBAL PARAMETERS ─────────────────────╮
-SESSION_NAME  = "test1"  # ai_process/<SESSION_NAME>
-HEATMAP_DIR   = os.path.expanduser("~/liquidLapse/heatmap_snapshots")
-MODEL_GLOB    = f"ai_process/{SESSION_NAME}/train_*/*/best_model.pt"
-N_FRAMES      = 10       # number of past snapshots to use
-DEVICE        = "cpu"    # e.g. "cuda:0"
+# ╭──────────────────── GLOBAL DEFAULTS ─────────────────────╮
+SESSION_NAME = "test1"
+HEATMAP_DIR  = os.path.expanduser("~/liquidLapse/heatmap_snapshots")
+MODEL_GLOB   = f"ai_process/{SESSION_NAME}/train_*/*/best_model.pt"
+N_FRAMES     = 10
+DEVICE       = "cpu"   # or "cuda:0"
 # ╰───────────────────────────────────────────────────────────╯
 
 # ──────────────────────── MODEL CLASS ─────────────────────────
@@ -39,94 +45,104 @@ class CNN_LSTM(nn.Module):
         out,_ = self.lstm(f)
         return self.regressor(out[:,-1]).squeeze(1)
 
-# ─────────────────────── HELPERS ─────────────────────────────
+# ──────────────────────── HELPERS ─────────────────────────────
 def parse_timestamp(fname):
-    """
-    Extract datetime from filenames like:
-      heatmap_YYYY-MM-DD_HH-MM-SS_CURRENCY-price.png
-    """
-    pattern = r"heatmap_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})_"
-    m = re.search(pattern, fname)
+    m = re.search(r"heatmap_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})_", fname)
     if not m:
-        raise ValueError(f"Filename {fname} doesn't match timestamp pattern")
-    dt_str = f"{m.group(1)} {m.group(2).replace('-',':')}"
-    return datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")  # :contentReference[oaicite:1]{index=1}
+        raise ValueError(f"Cannot parse timestamp in '{fname}'")
+    dt = f"{m.group(1)} {m.group(2).replace('-',':')}"
+    return datetime.strptime(dt, "%Y-%m-%d %H:%M:%S")
 
-def find_last_model(glob_pattern):
-    """
-    Pick the latest matching model .pt file
-    """
-    cands = glob.glob(glob_pattern)
-    if not cands:
-        raise FileNotFoundError(f"No model found for {glob_pattern}")
-    return sorted(cands)[-1]
+def find_latest_model(glob_pat):
+    files = glob.glob(glob_pat)
+    if not files:
+        print(f"[ERROR] No model files match '{glob_pat}'", file=sys.stderr)
+        sys.exit(1)
+    return sorted(files)[-1]
+
+def list_snapshots(dir_path):
+    pats = glob.glob(os.path.join(dir_path, "heatmap_*.png"))
+    return sorted(pats, key=lambda f: parse_timestamp(os.path.basename(f)))
 
 def build_transforms():
     return transforms.Compose([
         transforms.Resize((224,224)),
         transforms.ToTensor(),
-        transforms.Normalize([0.485,0.456,0.406],
-                             [0.229,0.224,0.225])
+        transforms.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225])
     ])
 
-# ──────────────────────── MAIN ───────────────────────────────
+# ─────────────────────────── MAIN ─────────────────────────────
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--frames",    type=int,   default=N_FRAMES,
-                        help="Number of past snapshots to use")
-    parser.add_argument("--end-file",  type=str,   default=None,
-                        help="Specific snapshot filename to end on")
-    parser.add_argument("--model-path",type=str,   default=None,
-                        help="Path or glob to best_model.pt")
-    parser.add_argument("--device",    type=str,   default=DEVICE)
-    args = parser.parse_args()
+    p = argparse.ArgumentParser()
+    p.add_argument("--session",   default=SESSION_NAME)
+    p.add_argument("--model",     help="Path or glob to best_model.pt")
+    p.add_argument("--end-file",  help="Filename or timestamp to end on")
+    p.add_argument("--frames",    type=int, default=N_FRAMES)
+    p.add_argument("--device",    default=DEVICE)
+    p.add_argument("--freeze",    action="store_true", help="Freeze CNN weights")
+    p.add_argument("--backbone",  default="resnet18")
+    p.add_argument("--hidden",    type=int, default=128)
+    p.add_argument("--layers",    type=int, default=1)
+    p.add_argument("--dropout",   type=float, default=0.25)
+    args = p.parse_args()
 
-    device = torch.device(args.device)
-    print(f"[INFO] Device: {device}")
+    # Resolve device
+    device = torch.device(args.device if torch.cuda.is_available() or "cpu" else "cpu")
+    print(f"[INFO] Using device: {device}")
 
-    # 1) Gather all heatmap filenames and sort by embedded timestamp
-    files = glob.glob(os.path.join(HEATMAP_DIR, "heatmap_*.png"))
-    files.sort(key=lambda f: parse_timestamp(os.path.basename(f)))
-    print(f"[INFO] Found {len(files)} snapshots in {HEATMAP_DIR}")
+    # Find model
+    model_path = args.model or find_latest_model(
+        f"ai_process/{args.session}/train_*/*/best_model.pt"
+    )
+    print(f"[INFO] Loading model from: {model_path}")
 
-    # 2) Select last N frames (or anchor on --end-file)
+    # Gather snapshots
+    snaps = list_snapshots(HEATMAP_DIR)
+    print(f"[INFO] Found {len(snaps)} snapshots in {HEATMAP_DIR}")
+
+    # Determine end index
     if args.end_file:
-        # find index of the specified file
-        base = os.path.basename(args.end_file)
-        indices = [i for i,f in enumerate(files) if base in os.path.basename(f)]
-        if not indices:
-            raise ValueError(f"{args.end_file} not found in snapshots")
-        end_idx = indices[-1]
+        # allow timestamp or filename substring
+        def match(f):
+            return args.end_file in os.path.basename(f) or args.end_file in parse_timestamp(os.path.basename(f)).isoformat()
+        idxs = [i for i,f in enumerate(snaps) if match(f)]
+        if not idxs:
+            print(f"[ERROR] end-file '{args.end_file}' not found", file=sys.stderr); sys.exit(1)
+        end_idx = idxs[-1]
     else:
-        end_idx = len(files)-1
+        end_idx = len(snaps)-1
 
     start_idx = max(0, end_idx - args.frames + 1)
-    seq_files = files[start_idx:end_idx+1]
+    seq_files = snaps[start_idx:end_idx+1]
     if len(seq_files) < args.frames:
-        print(f"[WARN] Only {len(seq_files)} frames available; model expects {args.frames}")
+        print(f"[WARN] Only {len(seq_files)} frames available, needed {args.frames}")
 
-    print(f"[INFO] Using frames {start_idx}→{end_idx} ({len(seq_files)} total)")
-
-    # 3) Load images and apply transforms
-    tf = build_transforms()
-    imgs = []
+    print(f"[INFO] Using frames [{start_idx}→{end_idx}]:")
     for f in seq_files:
-        imgs.append(tf(Image.open(f).convert("RGB")))
-    x = torch.stack(imgs).unsqueeze(0).to(device)  # [1,T,3,224,224]
+        print("   ", os.path.basename(f))
 
-    # 4) Load model architecture & weights
-    model_path = args.model_path or find_last_model(MODEL_GLOB)
-    from train_model import BACKBONE_NAME, LSTM_HIDDEN, LSTM_LAYERS, REG_DROPOUT, FREEZE_BACKBONE
-    model = CNN_LSTM(BACKBONE_NAME, LSTM_HIDDEN, LSTM_LAYERS, REG_DROPOUT, FREEZE_BACKBONE)
-    ckpt = torch.load(model_path, map_location=device)
-    model.load_state_dict(ckpt)
+    # Load images
+    tf = build_transforms()
+    imgs = torch.stack([
+        tf(Image.open(fp).convert("RGB"))
+        for fp in seq_files
+    ]).unsqueeze(0).to(device)  # [1,T,3,224,224]
+
+    # Build & load model
+    model = CNN_LSTM(
+        args.backbone, args.hidden, args.layers, args.dropout, 
+        freeze=args.freeze
+    )
+    state = torch.load(model_path, map_location=device)
+    model.load_state_dict(state)
     model.to(device).eval()
-    print(f"[INFO] Loaded model from {model_path}")
+    print(f"[INFO] Model ready. Backbone={args.backbone}, feat→LSTM({args.hidden}×{args.layers})")
 
-    # 5) Predict
+    # Inference
     with torch.no_grad():
-        pred = model(x).item()
-    print(f"[RESULT] Predicted next {TARGET_FIELD} = {pred:.3f}%")
+        pred = model(imgs).item()
+    print(f"\n[RESULT] Predicted next {TARGET_FIELD} = {pred:.3f}%\n")
+
 
 if __name__=="__main__":
     main()
