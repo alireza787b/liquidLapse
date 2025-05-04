@@ -187,7 +187,7 @@ def main():
     # inference
     with torch.no_grad():
         pred = model(x).item()
-    print(f"\n[RESULT] Predicted next-step {TARGET_FIELD} = {pred:.3f}%\n")
+    print(f"\n[RESULT] Predicted next-step = {pred:.3f}%\n")
 
 
 if __name__ == "__main__":
