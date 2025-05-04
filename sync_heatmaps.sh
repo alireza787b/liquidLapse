@@ -1,94 +1,78 @@
 #!/usr/bin/env bash
 # sync_heatmaps.sh
 #
-# Interactive script to pull new heatmap PNGs from a remote VPS via rsync.
-# Prompts for remote server, paths, and options, then runs rsync with progress.
+# Interactive script to pull only NEW heatmap PNGs from your VPS to local.
+# Guides you through server, paths, and options, then runs rsync with progress.
 #
-# Usage: ./sync_heatmaps.sh
-#   or:  ./sync_heatmaps.sh --dry-run
+# Usage: ./sync_heatmaps.sh           # real run
+#        ./sync_heatmaps.sh --dry-run # preview only
 
 set -euo pipefail
 IFS=$'\n\t'
 
-# ──────── Configuration Defaults ────────
-DEFAULT_REMOTE="root@nb1.joomtalk.ir"                     # remote user@host
-DEFAULT_REMOTE_DIR="~/liquidLapse/heatmap_snapshots"       # remote heatmaps path
-LOCAL_DIR="${HOME}/liquidLapse/heatmap_snapshots"          # local destination
-SSH_KEY="${HOME}/.ssh/id_rsa"                              # SSH private key
-# ──────────────────────────────────────────
+# ────────── Defaults ──────────
+DEFAULT_REMOTE="root@nb1.joomtalk.ir"
+# Use absolute path on remote to avoid '~' expansion issues :contentReference[oaicite:0]{index=0}
+DEFAULT_REMOTE_DIR="/root/liquidLapse/heatmap_snapshots"
+LOCAL_DIR="${HOME}/liquidLapse/heatmap_snapshots"
+SSH_KEY="${HOME}/.ssh/id_rsa"
+# ─────────────────────────────
 
-# Colors for output
+# Colors for clarity
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
-# ──────── Utility Functions ────────
+# ─────── Utility ───────
+err()   { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
+info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 
-# Print an error and exit
-err() {
-  echo -e "${RED}[ERROR]${NC} $*" >&2
-  exit 1
-}
-
-# Prompt user with default
 prompt() {
-  local var="$1"; shift
-  local def="$1"; shift
-  echo -ne "${YELLOW}$*${NC} [${def}]: "
-  read -r reply
-  echo "${reply:-$def}"
+  local var="$1"; local def="$2"; shift 2
+  read -rp "$* [$def]: " val
+  printf -v "$var" '%s' "${val:-$def}"
 }
+# ─────────────────────────
 
-# Validate SSH connectivity
-check_ssh() {
-  ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 "$1" "echo 2>&1" >/dev/null \
-    || err "Cannot SSH to '$1'. Check hostname/key."
-}
-
-# ──────── Main Script ────────
-
-echo -e "${GREEN}--- Heatmap Sync Script ---${NC}"
-echo "This will pull only NEW PNGs from your VPS to local."
+echo -e "${GREEN}=== Heatmap Sync Script ===${NC}"
+echo "This will pull only NEW PNGs from your VPS to your local folder."
 echo
 
-# 1) Gather parameters interactively
-REMOTE=$(prompt REMOTE "$DEFAULT_REMOTE" \
-  "Enter remote server (user@host)")                                      # :contentReference[oaicite:4]{index=4}
+# 1) Prompt for remote server & path
+prompt REMOTE      "$DEFAULT_REMOTE"     "Enter remote server (user@host)" 
+prompt REMOTE_DIR  "$DEFAULT_REMOTE_DIR" "Enter remote heatmap directory (absolute)" :contentReference[oaicite:1]{index=1}
 
-REMOTE_DIR=$(prompt REM_DIR "$DEFAULT_REMOTE_DIR" \
-  "Enter remote heatmap directory")                                        # :contentReference[oaicite:5]{index=5}
+# 2) Prompt for local destination
+prompt LOCAL_DIR   "$LOCAL_DIR"          "Enter local destination directory"
+mkdir -p "$LOCAL_DIR"  # ensure exists :contentReference[oaicite:2]{index=2}
 
-LOCAL_DIR=$(prompt LOCAL_DIR "$LOCAL_DIR" \
-  "Enter local destination directory")                                     # :contentReference[oaicite:6]{index=6}
-
-# 2) Dry-run?
+# 3) Dry-run?
 DRY_RUN=false
 if [[ "${1:-}" == "--dry-run" ]]; then
   DRY_RUN=true
-  echo -e "${YELLOW}[DRY-RUN]${NC} No files will actually be copied."
+  echo -e "${YELLOW}[DRY-RUN]${NC} No files will be actually copied."
 fi
 
-# 3) Check SSH connectivity
-echo -n "Checking SSH connectivity to ${REMOTE}... "
-check_ssh "$REMOTE" && echo -e "${GREEN}OK${NC}"
+# 4) Test SSH connectivity (allowing password fallback) 
+echo -n "Testing SSH to ${REMOTE}... "
+if ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$REMOTE" exit; then
+  echo -e "${GREEN}OK${NC}"
+else
+  warn "SSH key login failed, will prompt for password if needed"
+fi
 
-# 4) Ensure local directory exists
-echo -n "Ensuring local directory exists at ${LOCAL_DIR}... "
-mkdir -p "$LOCAL_DIR" && echo -e "${GREEN}Done${NC}"                 # :contentReference[oaicite:7]{index=7}
-
-# 5) Perform rsync
+# 5) Build rsync options
 RSYNC_OPTS=(-avz --ignore-existing --progress -e "ssh -i $SSH_KEY")
-RSYNC_SRC="${REMOTE}:${REMOTE_DIR%/}/"   # strip trailing slash, then add one
+RSYNC_SRC="${REMOTE}:${REMOTE_DIR%/}/"   # ensure single trailing slash
 RSYNC_DST="$LOCAL_DIR/"
 
-echo
-echo -e "${GREEN}Running rsync...${NC}"
+# 6) Run rsync
+echo; info "Running rsync..."
 if $DRY_RUN; then
-  rsync "${RSYNC_OPTS[@]}" --dry-run "$RSYNC_SRC" "$RSYNC_DST"          # :contentReference[oaicite:8]{index=8}
+  rsync "${RSYNC_OPTS[@]}" --dry-run "$RSYNC_SRC" "$RSYNC_DST"
 else
   rsync "${RSYNC_OPTS[@]}" "$RSYNC_SRC" "$RSYNC_DST"
 fi
 
-# 6) Report results
-echo
-echo -e "${GREEN}Sync complete.${NC}"
-echo "New files (if any) have been transferred to:"
-echo -e "  ${YELLOW}${LOCAL_DIR}${NC}"
+# 7) Done
+echo; info "Sync complete."
+echo "New files (if any) are now in: ${YELLOW}${LOCAL_DIR}${NC}"
