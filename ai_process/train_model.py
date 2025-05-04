@@ -1,85 +1,112 @@
 #!/usr/bin/env python3
 """
-CNN→LSTM trainer with dynamic backbone compatibility.
-Author: Alireza Ghaderi • 2025-05-02
+CNN→LSTM Trainer for BTC Liquidity‐Heatmap Sequences
+Author : Alireza Ghaderi • 2025‐05‐XX
+
+Loads your preprocessed sequences (images + future target) and trains:
+    1. A transfer‐learned CNN trunk (any torchvision model)
+    2. An LSTM head over the CNN feature sequences
+    3. A final regressor predicting the next %‐change
+
+Features:
+  • Automatic backbone extraction (handles any torchvision model)
+  • Configurable hyperparameters at the top
+  • Robust summary/TensorBoard graphing that won’t crash your run
+  • Clear terminal logs: data split, model dims, epoch‐by‐epoch losses
+  • Early stopping + best‐model checkpointing
 """
 
-import os, json, math, csv, datetime, time, inspect
-import torch, torch.nn as nn
+import os
+import json
+import math
+import csv
+import datetime
+import time
+import inspect
+
+import torch
+import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import models, transforms
 from PIL import Image
 
 # ╭────────────────── GLOBAL CONFIG (edit here) ──────────────────╮
-SESSION_NAME    = "test1"               # which processed session to use
+SESSION_NAME    = "test1"               # which ai_process/<session> to use
 BACKBONE_NAME   = "inception_v3"        # any torchvision.models.<name>
 FREEZE_BACKBONE = True                  # True = freeze CNN weights
-LSTM_HIDDEN     = 128                   # hidden size of LSTM
-LSTM_LAYERS     = 1                     # number of stacked LSTM layers
-REG_DROPOUT     = 0.25                  # dropout before final FC (0 = none)
-TARGET_FIELD    = "change_percent_step" # field in future_prediction JSON
-TRAIN_SPLIT     = 0.8                   # fraction for training set
-VAL_SPLIT       = 0.2                   # fraction for validation set
-BATCH_SIZE      = 4                     # batch size per device
-EPOCHS          = 30                    # maximum epochs
+LSTM_HIDDEN     = 128                   # hidden dim of LSTM
+LSTM_LAYERS     = 1                     # number of LSTM layers
+REG_DROPOUT     = 0.25                  # dropout before final FC
+TARGET_FIELD    = "change_percent_step" # JSON field to predict
+TRAIN_SPLIT     = 0.8                   # train fraction
+VAL_SPLIT       = 0.2                   # val fraction (test = remainder)
+BATCH_SIZE      = 4                     # per‐device batch size
+EPOCHS          = 30                    # max epochs
 LEARNING_RATE   = 1e-4                  # Adam LR
-PATIENCE        = 5                     # early-stop patience
-GPU_DEVICE      = 0                     # -1=CPU or CUDA index
-VISUALIZE_MODEL = True                  # show torchinfo + TensorBoard
+PATIENCE        = 5                     # early‐stop patience
+GPU_DEVICE      = 0                     # -1 = CPU, else CUDA index
+VISUALIZE_MODEL = True                  # try torchinfo + TensorBoard
 # ╰───────────────────────────────────────────────────────────────╯
 
-# ───────────────────────── Paths ───────────────────────────
+# ─────────────────────────── Paths ────────────────────────────
 BASE_DIR = os.path.expanduser("~/liquidLapse")
 SEQ_JSON = f"ai_process/{SESSION_NAME}/sequences/sequences_info.json"
 RUN_TS   = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 RUN_DIR  = os.path.join(BASE_DIR, f"ai_process/{SESSION_NAME}/train_{RUN_TS}")
 os.makedirs(RUN_DIR, exist_ok=True)
 
-# ─────────────────────────── Backbone Utils ───────────────────────────
-def load_backbone(name, freeze=True):
+# ───────────────────── Backbone Loader ─────────────────────────
+def load_backbone(name: str, freeze: bool = True):
     """
-    Instantiates a torchvision model by name, auto-disabling any
-    auxiliary heads (e.g., inception_v3(aux_logits=False)),
-    and returns (cnn, feat_dim, input_size).
+    Instantiate torchvision model `name`, disable aux heads, extract:
+      • trunk: all conv/pool layers (no classifier or dropout)
+      • feat_dim: feature vector size output by trunk
+      • input_size: (H,W) the default image size for this model
     """
-    model_fn = getattr(models, name)
-    sig = inspect.signature(model_fn)
+    fn = getattr(models, name)
+    sig = inspect.signature(fn)
     kwargs = {}
-    # Disable aux_logits if supported
     if "aux_logits" in sig.parameters:
         kwargs["aux_logits"] = False
-    # Disable transform_input if supported (we handle transforms ourselves)
     if "transform_input" in sig.parameters:
         kwargs["transform_input"] = False
-    # Load pretrained weights
-    cnn = model_fn(weights="DEFAULT", **kwargs)
-    # Remove final classifier layers, keep convolution + pool
-    trunk = nn.Sequential(*list(cnn.children())[:-1])
-    # Feature dimension = in_features of classifier
-    feat_dim = cnn.fc.in_features if hasattr(cnn, "fc") else (
-        cnn.classifier[-1].in_features if hasattr(cnn, "classifier") else None
-    )
-    # Determine expected input size: NCHW tuple
+    cnn = fn(weights="DEFAULT", **kwargs)
+    # chop off classifier & any trailing dropout
+    children = list(cnn.children())
+    # find last conv/pool before classifier
+    # most models end with a global pool + classifier
+    trunk = nn.Sequential(*children[:-1])
+    # feature dim: either cnn.fc.in_features or cnn.classifier[-1].in_features
+    if hasattr(cnn, "fc"):
+        feat_dim = cnn.fc.in_features
+    elif hasattr(cnn, "classifier"):
+        feat_dim = cnn.classifier[-1].in_features
+    else:
+        raise RuntimeError(f"Cannot infer feat_dim for backbone {name}")
+    # get default_cfg.input_size if present
     cfg = getattr(cnn, "default_cfg", {})
-    input_size = cfg.get("input_size", (3, 224, 224))[1:]  # (H,W) :contentReference[oaicite:2]{index=2}
-    # Freeze if requested
+    inp = cfg.get("input_size", (3, 224, 224))
+    input_size = (inp[1], inp[2])
     if freeze:
-        for p in trunk.parameters(): p.requires_grad = False
+        for p in trunk.parameters():
+            p.requires_grad = False
     return trunk, feat_dim, input_size
 
 # ───────────────────────── Dataset ────────────────────────────
 class HeatmapSeqDataset(Dataset):
-    """Loads sequences of heatmap images and their numeric targets."""
-    def __init__(self, json_path):
-        with open(os.path.join(BASE_DIR, json_path),'r') as f:
+    """Sequence dataset: returns (images tensor [T,3,H,W], target float)."""
+    def __init__(self, json_path: str):
+        with open(os.path.join(BASE_DIR, json_path), "r") as f:
             meta = json.load(f)
+        # keep only sequences with future_prediction
         self.meta = [m for m in meta if "future_prediction" in m]
-        # Dynamically get transform from backbone
-        _, _, (h, w) = load_backbone(BACKBONE_NAME, freeze=FREEZE_BACKBONE)
+        # build transforms to match backbone’s expected size
+        _, _, (H, W) = load_backbone(BACKBONE_NAME, freeze=FREEZE_BACKBONE)
         self.tf = transforms.Compose([
-            transforms.Resize((h, w)),     # match model’s default_cfg :contentReference[oaicite:3]{index=3}
+            transforms.Resize((H, W)),
             transforms.ToTensor(),
-            transforms.Normalize([0.485,0.456,0.406], [0.229,0.224,0.225])
+            transforms.Normalize([0.485, 0.456, 0.406],
+                                 [0.229, 0.224, 0.225])
         ])
 
     def __len__(self):
@@ -88,50 +115,57 @@ class HeatmapSeqDataset(Dataset):
     def __getitem__(self, idx):
         seq = self.meta[idx]
         imgs = torch.stack([
-            self.tf(Image.open(it["image_path"]).convert("RGB"))
-            for it in seq["items"]
+            self.tf(Image.open(item["image_path"]).convert("RGB"))
+            for item in seq["items"]
         ])  # [T,3,H,W]
-        y = float(seq["future_prediction"][TARGET_FIELD])
-        return imgs, torch.tensor(y, dtype=torch.float32)
+        tgt = float(seq["future_prediction"][TARGET_FIELD])
+        return imgs, torch.tensor(tgt, dtype=torch.float32)
 
-# ───────────────────────── Model ────────────────────────────
+# ───────────────────────── Model ─────────────────────────────
 class CNN_LSTM(nn.Module):
-    """Takes [B,T,3,H,W] → CNN trunk → LSTM → regression."""
+    """CNN trunk → LSTM over time → regression head."""
     def __init__(self, backbone, hidden, layers, dropout, freeze=True):
         super().__init__()
         trunk, feat_dim, _ = load_backbone(backbone, freeze=freeze)
-        self.features = trunk           # outputs [B*T, feat_dim, 1, 1]
-        self.lstm = nn.LSTM(feat_dim, hidden, layers, batch_first=True)
+        self.features = trunk
+        self.lstm     = nn.LSTM(feat_dim, hidden, layers, batch_first=True)
         head = [nn.Linear(hidden, 64), nn.ReLU()]
         if dropout > 0:
             head.append(nn.Dropout(dropout))
         head.append(nn.Linear(64, 1))
         self.regressor = nn.Sequential(*head)
-        # Store for reporting
+
+        # store for reporting
         self._feat_dim    = feat_dim
         self._lstm_hid    = hidden
         self._lstm_layers = layers
 
     def forward(self, x):
+        """
+        x: [B, T, 3, H, W]
+        → collapse → [B*T,3,H,W] → trunk → [B,T,feat_dim]
+        → LSTM → take last output → regressor → [B]
+        """
         B, T, C, H, W = x.shape
-        # collapse batch & time to run CNN trunk
-        f = self.features(x.view(B*T, C, H, W))
-        f = f.view(B, T, -1)            # [B, T, feat_dim]
-        out, _ = self.lstm(f)            # [B, T, hidden]
+        y = x.view(B*T, C, H, W)
+        f = self.features(y).view(B, T, -1)
+        out, _ = self.lstm(f)
         return self.regressor(out[:, -1]).squeeze(1)
 
-# ─────────────────────── Training Utilities ───────────────────────
+# ───────────────────── Training Step ─────────────────────────
 def step(model, loader, loss_fn, optim=None, device="cpu"):
-    train = optim is not None
-    model.train() if train else model.eval()
+    training = optim is not None
+    model.train() if training else model.eval()
     total = 0.0
     for X, y in loader:
         X, y = X.to(device), y.to(device)
-        if train: optim.zero_grad()
+        if training:
+            optim.zero_grad()
         pred = model(X)
         loss = loss_fn(pred, y)
-        if train:
-            loss.backward(); optim.step()
+        if training:
+            loss.backward()
+            optim.step()
         total += loss.item() * X.size(0)
     return total / len(loader.dataset)
 
@@ -139,28 +173,37 @@ def step(model, loader, loss_fn, optim=None, device="cpu"):
 def main():
     assert 0 < TRAIN_SPLIT < 1 and 0 <= VAL_SPLIT < 1 and TRAIN_SPLIT + VAL_SPLIT <= 1
 
-    device = (torch.device(f"cuda:{GPU_DEVICE}") if GPU_DEVICE >= 0 and torch.cuda.is_available()
-              else torch.device("cpu"))
-    print(f"[INFO] Device: {device}")
+    # device
+    dev = (
+        torch.device(f"cuda:{GPU_DEVICE}")
+        if GPU_DEVICE >= 0 and torch.cuda.is_available()
+        else torch.device("cpu")
+    )
+    print(f"[INFO] Device: {dev}")
 
+    # dataset & splits
     ds = HeatmapSeqDataset(SEQ_JSON)
-    N = len(ds)
+    N  = len(ds)
     n_train = int(TRAIN_SPLIT * N)
     n_val   = int(VAL_SPLIT   * N)
     n_test  = N - n_train - n_val
     train_ds, val_ds, test_ds = random_split(
-        ds, [n_train, n_val, n_test], generator=torch.Generator().manual_seed(42)
+        ds, [n_train, n_val, n_test],
+        generator=torch.Generator().manual_seed(42)
     )
     print(f"[DATA] total={N}  train={n_train}  val={n_val}  test={n_test}")
 
-    dl_train = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
+    # loaders
+    dl_train = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,  drop_last=True)
     dl_val   = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False, drop_last=False)
 
-    model = CNN_LSTM(BACKBONE_NAME, LSTM_HIDDEN, LSTM_LAYERS, REG_DROPOUT, FREEZE_BACKBONE).to(device)
+    # model, loss, optimizer
+    model     = CNN_LSTM(BACKBONE_NAME, LSTM_HIDDEN, LSTM_LAYERS, REG_DROPOUT, FREEZE_BACKBONE).to(dev)
     loss_fn   = nn.MSELoss()
-    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=LEARNING_RATE)
+    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
+                                 lr=LEARNING_RATE)
 
-    # Report architecture
+    # architecture report
     print("\n[MODEL]")
     print(f"  Backbone:       {BACKBONE_NAME}")
     print(f"  Feature dim:    {model._feat_dim}")
@@ -168,41 +211,43 @@ def main():
     print(f"  LSTM hidden:    {model._lstm_hid}")
     print(f"  Regressor head: {model.regressor}\n")
 
-    # Visualization (optional)
+    # optional visualization (safe against any errors)
     if VISUALIZE_MODEL:
         try:
             from torchinfo import summary
-            # dummy input shape: (B,T,C,H,W)
-            T = len(ds[0][0])
+            # get T and H,W for dummy
+            T = ds[0][0].shape[0]
             _, _, (h, w) = load_backbone(BACKBONE_NAME)
             print(summary(model, input_size=(BATCH_SIZE, T, 3, h, w)))
             from torch.utils.tensorboard import SummaryWriter
             tb = SummaryWriter(RUN_DIR)
-            dummy = torch.randn(BATCH_SIZE, T, 3, h, w).to(device)
-            tb.add_graph(model, dummy); tb.close()
+            dummy = torch.randn(BATCH_SIZE, T, 3, h, w).to(dev)
+            tb.add_graph(model, dummy)
+            tb.close()
             print(f"[TBOARD] tensorboard --logdir {RUN_DIR}")
-        except ImportError:
-            print("[WARN] Install torchinfo & tensorboard to visualise model.")
+        except Exception as e:
+            print(f"[WARN] Model viz skipped: {e}")
 
-    # Training loop
+    # training loop with early stopping
     best_val, wait = math.inf, 0
     log_csv = os.path.join(RUN_DIR, "train_log.csv")
-    with open(log_csv, "w", newline="") as logf:
-        writer = csv.writer(logf)
-        writer.writerow(["epoch", "train_loss", "val_loss", "time_s"])
+    with open(log_csv, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["epoch", "train_loss", "val_loss", "elapsed_s"])
         print(f"[TRAIN] Starting up to {EPOCHS} epochs...\n")
         for epoch in range(1, EPOCHS + 1):
             t0 = time.time()
-            tl = step(model, dl_train, loss_fn, optimizer, device)
-            vl = step(model, dl_val,   loss_fn, None,      device)
+            tr = step(model, dl_train, loss_fn, optimizer, dev)
+            vl = step(model, dl_val,   loss_fn, None,      dev)
             dt = time.time() - t0
-            writer.writerow([epoch, f"{tl:.4f}", f"{vl:.4f}", f"{dt:.1f}"])
-            print(f"Epoch {epoch:02d} | train={tl:.4f} | val={vl:.4f} | {dt:.1f}s")
+            writer.writerow([epoch, f"{tr:.4f}", f"{vl:.4f}", f"{dt:.1f}"])
+            print(f"Epoch {epoch:02d} | train={tr:.4f} | val={vl:.4f} | {dt:.1f}s")
+
             if vl < best_val:
                 best_val, wait = vl, 0
-                pth = os.path.join(RUN_DIR, "best_model.pt")
-                torch.save(model.state_dict(), pth)
-                print(f"  [SAVE] New best ({vl:.4f}) → {pth}")
+                ckpt = os.path.join(RUN_DIR, "best_model.pt")
+                torch.save(model.state_dict(), ckpt)
+                print(f"  [SAVE] New best ({vl:.4f}) → {ckpt}")
             else:
                 wait += 1
                 if wait >= PATIENCE:
