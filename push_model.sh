@@ -31,7 +31,7 @@ prompt() {
 }
 
 check_ssh() {
-  ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=5 "$1" exit \
+    ssh -i "$SSH_KEY" "$REMOTE" exit
     &>/dev/null || return 1
   return 0
 }
