@@ -11,7 +11,7 @@ set -euo pipefail
 IFS=$'\n\t'
 
 # ────────── Defaults ──────────
-DEFAULT_REMOTE="root@nb1.joomtalk.ir"
+DEFAULT_REMOTE="remote_user_name@remote_ip"
 # Use absolute path on remote to avoid '~' expansion issues :contentReference[oaicite:0]{index=0}
 DEFAULT_REMOTE_DIR="/root/liquidLapse/heatmap_snapshots"
 LOCAL_DIR="${HOME}/liquidLapse/heatmap_snapshots"

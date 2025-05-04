@@ -14,7 +14,7 @@ IFS=$'\n\t'
 DEFAULT_SESSION="test1"
 LOCAL_BASE_DIR="${HOME}/liquidLapse/ai_process"
 SSH_KEY="${HOME}/.ssh/id_rsa"
-DEFAULT_REMOTE="root@nb1.joomtalk.ir"
+DEFAULT_REMOTE="remote_user_name@remote_ip"
 # Remote AI-process base: /root/liquidLapse/ai_process
 # ───────────────────────────────────────────────
 
