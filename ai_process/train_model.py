@@ -55,55 +55,57 @@ RUN_TS   = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
 RUN_DIR  = os.path.join(BASE_DIR, f"ai_process/{SESSION_NAME}/train_{RUN_TS}")
 os.makedirs(RUN_DIR, exist_ok=True)
 
-# ───────────────────── Backbone Loader ─────────────────────────
+# ───────────────────── Backbone Loader ──────────────────────
 def load_backbone(name: str, freeze: bool = True):
     """
-    Instantiate torchvision model `name`, disable aux heads, extract:
-      • trunk: all conv/pool layers (no classifier or dropout)
-      • feat_dim: feature vector size output by trunk
-      • input_size: (H,W) the default image size for this model
+    Return cnn trunk (no classifier), feature dim and SAFE input_size.
+    For Inception‑style nets force 299×299 to avoid kernel‑size errors.
     """
-    fn = getattr(models, name)
+    fn  = getattr(models, name)
     sig = inspect.signature(fn)
     kwargs = {}
     if "aux_logits" in sig.parameters:
         kwargs["aux_logits"] = False
     if "transform_input" in sig.parameters:
         kwargs["transform_input"] = False
+
     cnn = fn(weights="DEFAULT", **kwargs)
-    # chop off classifier & any trailing dropout
-    children = list(cnn.children())
-    # find last conv/pool before classifier
-    # most models end with a global pool + classifier
-    trunk = nn.Sequential(*children[:-1])
-    # feature dim: either cnn.fc.in_features or cnn.classifier[-1].in_features
+
+    # strip classifier
+    trunk = nn.Sequential(*list(cnn.children())[:-1])
+
+    # feature dim
     if hasattr(cnn, "fc"):
         feat_dim = cnn.fc.in_features
-    elif hasattr(cnn, "classifier"):
+    else:  # EfficientNet / MobileNet
         feat_dim = cnn.classifier[-1].in_features
-    else:
-        raise RuntimeError(f"Cannot infer feat_dim for backbone {name}")
-    # get default_cfg.input_size if present
+
+    # default size, then patch if too small
     cfg = getattr(cnn, "default_cfg", {})
     inp = cfg.get("input_size", (3, 224, 224))
-    input_size = (inp[1], inp[2])
+    input_size = (inp[1], inp[2])          # (H,W)
+
+    # Inception nets need ≥75 px; use official 299
+    if name.startswith("inception") and max(input_size) < 299:
+        input_size = (299, 299)
+
     if freeze:
         for p in trunk.parameters():
             p.requires_grad = False
     return trunk, feat_dim, input_size
 
 # ───────────────────────── Dataset ────────────────────────────
+# HeatmapSeqDataset: use the SAFE size we just guaranteed
 class HeatmapSeqDataset(Dataset):
-    """Sequence dataset: returns (images tensor [T,3,H,W], target float)."""
     def __init__(self, json_path: str):
-        with open(os.path.join(BASE_DIR, json_path), "r") as f:
+        with open(os.path.join(BASE_DIR, json_path)) as f:
             meta = json.load(f)
-        # keep only sequences with future_prediction
         self.meta = [m for m in meta if "future_prediction" in m]
-        # build transforms to match backbone’s expected size
-        _, _, (H, W) = load_backbone(BACKBONE_NAME, freeze=FREEZE_BACKBONE)
+
+        _, _, self._input_size = load_backbone(BACKBONE_NAME, freeze=FREEZE_BACKBONE)
+        H, W = self._input_size
         self.tf = transforms.Compose([
-            transforms.Resize((H, W)),
+            transforms.Resize((H, W), antialias=True),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406],
                                  [0.229, 0.224, 0.225])
@@ -141,12 +143,9 @@ class CNN_LSTM(nn.Module):
         self._lstm_layers = layers
 
     def forward(self, x):
-        """
-        x: [B, T, 3, H, W]
-        → collapse → [B*T,3,H,W] → trunk → [B,T,feat_dim]
-        → LSTM → take last output → regressor → [B]
-        """
         B, T, C, H, W = x.shape
+        assert H >= 75 and W >= 75, \
+            f"Input to backbone too small: {(H,W)} – check transforms!"
         y = x.view(B*T, C, H, W)
         f = self.features(y).view(B, T, -1)
         out, _ = self.lstm(f)
