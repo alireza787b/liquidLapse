@@ -174,7 +174,7 @@ def main():
             from torchinfo import summary
             # dummy input shape: (B,T,C,H,W)
             T = len(ds[0][0])
-            _, (h, w) = load_backbone(BACKBONE_NAME)
+            _, _, (h, w) = load_backbone(BACKBONE_NAME)
             print(summary(model, input_size=(BATCH_SIZE, T, 3, h, w)))
             from torch.utils.tensorboard import SummaryWriter
             tb = SummaryWriter(RUN_DIR)
