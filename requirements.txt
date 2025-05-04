@@ -11,3 +11,8 @@ tensorboard>=2.16     # graph & metric visualisation
 selenium
 webdriver-manager
 PyYAML
+
+fastapi>=0.95            # web framework
+uvicorn[standard]>=0.22  # ASGI server
+pydantic>=2.0            # data validation
+python-multipart         # if you ever accept file uploads
