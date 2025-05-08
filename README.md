@@ -1,55 +1,71 @@
 # liquidLapse
 
-**liquidLapse** is a Python automation project that periodically captures snapshots of the CoinGlass liquidation heatmap. Snapshots are saved in a date-organized folder with informative date-time stamps (optionally including the current Bitcoin price), enabling later playback or review. The project now includes advanced sequence processing for AI training pipelines.
+**liquidLapse** is a Python-based automation project designed to periodically capture snapshots of CoinGlass liquidation heatmaps. The project processes these heatmaps into image sequences for AI model training, offering a seamless pipeline for cryptocurrency market prediction.
 
-## Features
+### Key Features:
 
-- **Automated Snapshot Capture:**  
-  Uses Selenium in headless mode to load the CoinGlass heatmap page, capture the heatmap's canvas element as an image, and save it with a timestamp.
+1. **Automated Snapshot Capture**
 
-- **BTC Price Integration:**  
-  Optionally appends the current Bitcoin price (fetched from a configurable API URL) to the snapshot filename for added context.
+   * Utilizes **Selenium** in headless mode to periodically capture the CoinGlass heatmap.
+   * **BTC Price Integration**: Optionally appends the current Bitcoin price to the snapshot filename for added context.
 
-- **AI-Ready Sequence Generation:**  
-  Processes captured snapshots into chronological sequences suitable for AI model training:
-  - Organizes images into fixed-length sequences
-  - Handles timestamp gaps with intelligent interpolation
-  - Tracks price changes across timeframes
-  - Includes future prediction data for supervised learning targets
-  - Maintains references to both original and processed image paths
+2. **AI-Ready Sequence Generation**
 
-- **Configurable Settings:**  
-  All key settings—including the target URL, snapshot interval, output folder, headless mode, BTC price API URL, and whether to include the BTC price in the filename—are stored in a `config.yaml` file for easy adjustments.
+   * Converts heatmap snapshots into sequences for AI model training, including:
 
-- **Robust Environment Setup:**  
-  A `setup.sh` script ensures that all system dependencies (Python, pip, venv, Google Chrome) are installed, creates a virtual environment, and installs the required Python packages.
+     * Chronologically ordered sequences.
+     * Handles timestamp gaps with intelligent interpolation.
+     * Tracks price changes and adds future predictions.
+     * Stores metadata along with images.
 
-- **Service Management with Detailed Status:**  
-  A `service.sh` script lets you start, stop, restart, and check the status of the liquidLapse service. The service runs `liquidLapse.py` in an infinite loop (using the interval defined in `config.yaml`), logs each snapshot execution, and updates a status file with execution details.
+3. **Flexible Configuration**
 
-- **Cross-Platform Support:**  
-  Designed to run on both Windows and Linux (including headless Linux servers).
+   * A `config.yaml` file allows easy customization of settings such as target URL, snapshot intervals, BTC price API URL, etc.
+
+4. **Service Management**
+
+   * A `service.sh` script to manage the execution of the snapshot capture service.
+   * Supports starting, stopping, and checking the status of the service.
+
+5. **AI Model Training & Prediction**
+
+   * Integrates **CNN + LSTM** for sequential prediction based on heatmap snapshots.
+   * Trains models and makes real-time predictions.
+   * Pushes and pulls models between local and remote servers.
+
+6. **API for Predictions**
+
+   * FastAPI-based server for real-time predictions.
+   * Offers flexibility to input the last image and number of frames to predict future market changes.
+
+7. **Cross-Platform Support**
+
+   * Works on both Windows and Linux, including headless Linux servers.
+
+---
 
 ## Project Structure
 
-```
+```plaintext
 liquidLapse/
-├── config.yaml
-├── liquidLapse.py
-├── sequence_generator.py     # New script for AI training sequence generation
-├── requirements.txt
-├── README.md
-├── setup.sh
-├── service.sh
-└── ai_process/               # Directory for AI processing outputs
-    └── session_name/         # Named session folders
-        ├── dataset_info.json # Dataset metadata
-        ├── images/           # Processed images
-        └── sequences/        # Generated sequences
+├── config.yaml                # Configuration file for snapshot capture and AI settings
+├── liquidLapse.py             # Main script for capturing heatmaps and starting the service
+├── sequence_generator.py      # AI sequence generator for preparing images for training
+├── requirements.txt           # Python dependencies for the project
+├── README.md                  # Project documentation
+├── setup.sh                   # Setup script for installing dependencies
+├── service.sh                 # Service script to manage the liquidLapse process
+└── ai_process/                # Directory for AI processing outputs
+    └── session_name/          # Session folders (named by date/time)
+        ├── dataset_info.json  # Metadata for all processed images
+        ├── images/            # Processed image files
+        └── sequences/         # Generated image sequences
             ├── sequences_info.json   # Metadata for all sequences
             └── sequence_n/   # Individual sequence folders
                 └── images/   # Sequence images
 ```
+
+---
 
 ## Setup & Usage Instructions
 
@@ -75,14 +91,14 @@ Then run it:
 ```
 
 This script will:
-- Update package repositories.
-- Install Python3, pip3, python3-venv, and Google Chrome (if needed).
-- Create a Python virtual environment.
-- Upgrade pip and install the required Python dependencies from `requirements.txt`.
+
+* Install system dependencies (Python, pip, Google Chrome).
+* Set up a virtual environment.
+* Install Python dependencies.
 
 ### 3. Configure the Application
 
-Edit the `config.yaml` file to set your preferences. For example:
+Edit the `config.yaml` file to customize the settings for snapshot capture:
 
 ```yaml
 # config.yaml
@@ -96,84 +112,108 @@ btc_price_url: "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_cur
 
 ### 4. Manage the liquidLapse Service
 
-Use the `service.sh` script to start, stop, restart, or check the status of the liquidLapse service.
+The `service.sh` script can be used to manage the liquidLapse service.
 
-- **Start the Service:**
+* **Start the Service:**
+
   ```bash
   ./service.sh start
   ```
-  This will run `liquidLapse.py` in the background at intervals defined in `config.yaml`, logging output to `liquidLapseService.log` and storing the PID in `liquidLapseService.pid`.
 
-- **Stop the Service:**
+  This will run `liquidLapse.py` in the background, logging output to `liquidLapseService.log`.
+
+* **Stop the Service:**
+
   ```bash
   ./service.sh stop
   ```
 
-- **Restart the Service:**
+* **Restart the Service:**
+
   ```bash
   ./service.sh restart
   ```
 
-- **Check the Service Status:**
+* **Check Service Status:**
+
   ```bash
   ./service.sh status
   ```
-  The status command displays whether the service is running and shows details (such as the last snapshot execution time, the configured interval, and any error messages) read from the status file.
 
 ### 5. Running Directly (Without Service Management)
 
-To run the snapshot script directly, activate the virtual environment and execute:
+You can also run the snapshot capture script directly:
 
 ```bash
 source venv/bin/activate   # On Windows use: venv\Scripts\activate
 python liquidLapse.py
 ```
 
-Press `Ctrl+C` to terminate the script.
+Press `Ctrl+C` to stop the script.
 
 ### 6. Generating AI Training Sequences
 
-After collecting snapshots, you can process them into training sequences:
+After capturing snapshots, generate training sequences for AI:
 
 ```bash
 source venv/bin/activate
 python sequence_generator.py
 ```
 
-Parameters:
-- `session_name`: Name of the processing session (default: "test1")
-- `session_length`: Number of images per sequence (default: 10)
+This script will:
 
-The script will:
-1. Process the snapshots in the `heatmap_snapshots` directory
-2. Generate fixed-length sequences with metadata
-3. Include future prediction data for each sequence
-4. Save everything in the `ai_process/[session_name]/sequences` directory
-5. Create a comprehensive `sequences_info.json` file with all metadata
+1. Process snapshots from the `heatmap_snapshots` directory.
+2. Generate fixed-length sequences with metadata.
+3. Include future prediction data.
+4. Save everything in `ai_process/[session_name]/sequences`.
+
+### 7. Training the AI Model
+
+To train the AI model (CNN + LSTM):
+
+```bash
+source venv/bin/activate
+python train_model.py
+```
+
+This script:
+
+1. Loads the sequences generated in step 6.
+2. Trains the model using the provided configurations.
+3. Saves the best model as `best_model.pt`.
+
+### 8. FastAPI Server for Real-Time Prediction
+
+To run the FastAPI server for real-time predictions:
+
+```bash
+source venv/bin/activate
+uvicorn fastapi_app:app --reload --host 0.0.0.0 --port 8100
+```
+
+The API provides a `/predict` endpoint where you can get predictions based on the latest model and heatmap images. It supports passing specific model names and image files for prediction or defaults to the latest available model and the most recent images.
 
 ---
 
 ## Additional Notes
 
-- **Linux Server Deployment:**  
-  With headless mode enabled in `config.yaml`, the script runs without a GUI—ideal for deployment on Linux VPS or headless servers.
+* **AI Training Pipeline Integration:**
+  The sequence generation feature creates structured data ready for machine learning model training. Each sequence contains chronological snapshots, price change data, and prediction targets.
 
-- **Scheduling:**  
-  While the service script runs continuously, you can also set up cron jobs (on Linux) or Windows Task Scheduler if you prefer to manage scheduling externally.
+* **Deployment to VPS:**
+  The system is designed to run in headless mode, making it suitable for deployment on remote VPS servers for both heatmap capturing and prediction tasks.
 
-- **Logs & Status:**  
-  - Runtime logs are saved to `liquidLapseService.log`.  
-  - The status file (`liquidLapseService.status`) is updated each snapshot cycle with details such as the last execution time and the snapshot interval.
+* **Scheduling:**
+  If not using the `service.sh` script, you can also set up cron jobs (Linux) or Windows Task Scheduler for managing snapshot capturing.
 
-- **AI Training Pipeline Integration:**  
-  The sequence generation feature creates structured data ready for machine learning model training:
-  - Each sequence contains a series of chronological snapshots
-  - Price change data is included for both the sequence and prediction targets
-  - All data is structured in JSON format for easy consumption by ML frameworks
-  - Paths to both original and processed images are maintained for flexibility
+* **Logs & Status:**
+
+  * Runtime logs are saved to `liquidLapseService.log`.
+  * Status information is saved in `liquidLapseService.status`.
 
 ---
 
 ## License
 
 This project is licensed under the Apache 2.0 License.
+

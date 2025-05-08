@@ -86,13 +86,13 @@ def generate_sequences(dataset_info):
             target_filepath = os.path.join(images_folder_path, f"{new_filename}.png")
             
             # Copy the image file
-            copyfile(original_filepath, target_filepath)
+            #copyfile(original_filepath, target_filepath)
             
             # Store sequence item information
             sequence_items.append({
                 'filename': new_filename,
                 'price': data_entry['price'],
-                'image_path': target_filepath,
+                #'image_path': target_filepath,
                 'original_path': data_entry.get('target_filepath')  # Path from dataset source
             })
         
