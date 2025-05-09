@@ -35,7 +35,7 @@ from torchvision.models.feature_extraction import create_feature_extractor   # :
 from torchvision.models import get_model_weights                              # :contentReference[oaicite:4]{index=4}
 from PIL import Image
 from termcolor import cprint
-
+from torchvision.models.feature_extraction import get_graph_node_names
 # ──────────── Paths ────────────
 BASE_DIR   = os.path.expanduser("~/liquidLapse")
 SEQ_JSON   = f"ai_process/{SESSION_NAME}/sequences/sequences_info.json"
@@ -64,38 +64,48 @@ class HeatmapSeqDataset(Dataset):
         return imgs, torch.tensor(target, dtype=torch.float32)
 
 # ──────────── Backbone helper ────────────
-def build_backbone(backbone_name:str, freeze:bool=True):
-    """Return (feature_extractor, feat_dim, transform, input_size)."""
-    # 1. get default weights enum
-    weight_enum = get_model_weights(backbone_name)  # :contentReference[oaicite:5]{index=5}
-    weights     = weight_enum.DEFAULT
-    model       = getattr(models, backbone_name)(weights=weights)
-    # 2. pick node just before classifier automatically
-    #    heuristic: last child before attr that looks like classifier
-    cls_candidates = ("fc", "classifier", "head", "heads", "_fc")
-    leaf_node = None
-    for name, _module in model.named_modules():
-        if any(name.endswith(a) for a in cls_candidates):
-            leaf_node = ".".join(name.split(".")[:-1]) or "flatten"
-            break
-    if leaf_node is None:  # fallback to last layer before pooling
-        leaf_node = list(dict(model.named_modules()).keys())[-2]
 
+
+def build_backbone(backbone_name: str, freeze: bool = True):
+    """
+    Build a backbone that returns the tensor *just before* the main classifier,
+    no matter what the model’s internal module naming scheme is.
+
+    Returns:
+        feat_extractor : nn.Module
+        feat_dim       : int        – flattened feature size
+        transform      : callable   – default preprocessing pipeline
+        input_size     : tuple(H,W)
+    """
+    weights_enum = get_model_weights(backbone_name)          # tv>=0.15
+    weights      = weights_enum.DEFAULT
+    model        = getattr(models, backbone_name)(weights=weights)
+
+    # ➊ Get the graph node names for eval-mode
+    eval_nodes, _ = get_graph_node_names(model)              # list[str]
+    # ➋ Classifier node is *last* node that produces (batch, num_classes)
+    #    We find its index, then take the node right before it.
+    cls_index = next(
+        (i for i, n in reversed(list(enumerate(eval_nodes)))
+         if "classifier" in n or n.endswith(".fc") or n.endswith(".head") or "logits" in n),
+        len(eval_nodes) - 1
+    )
+    feature_node = eval_nodes[cls_index - 1]                 # robust pick
+
+    # ➌ Build feature extractor
     feat_extractor = create_feature_extractor(
-        model, return_nodes={leaf_node: "features"}
-    )                                                     # :contentReference[oaicite:6]{index=6}
+        model, return_nodes={feature_node: "features"}
+    )
     if freeze:
-        for p in feat_extractor.parameters():
-            p.requires_grad = False
+        for p in feat_extractor.parameters(): p.requires_grad = False
 
-    # 3. infer feature-vector dim
-    dummy = torch.zeros(1,3,*weights.meta["min_size"])
+    # ➍ Infer feature dimension with a dummy forward
+    dummy = torch.zeros(1, 3, *weights.meta["min_size"])
     with torch.no_grad():
-        feat_dim = feat_extractor(dummy)["features"].view(1,-1).shape[1]
+        feat_dim = feat_extractor(dummy)["features"].view(1, -1).shape[1]
 
-    transform = weights.transforms()
-    input_size = weights.meta["min_size"]
-    return feat_extractor, feat_dim, transform, input_size
+    return feat_extractor, feat_dim, weights.transforms(), weights.meta["min_size"]
+
 
 # ──────────── Model ────────────
 class CNN_LSTM(nn.Module):
