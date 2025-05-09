@@ -107,10 +107,14 @@ def build_transforms():
     ])
 
 # Load the dataset_info.json file into memory
-test_path = os.path.join(MODEL_BASE_DIR,SESSION_NAME)
-dataset_path = os.path.join(test_path, 'dataset_info.json')
-with open(dataset_path, 'r') as f:
-    dataset_info = json.load(f)
+def load_dataset_info(session_name):
+    dataset_path = os.path.join(MODEL_BASE_DIR, session_name, 'dataset_info.json')
+    try:
+        with open(dataset_path, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"[WARNING] Dataset info not found at {dataset_path}")
+        return []
 
 # ─────────────────── Model Definition ───────────────────
 class CNN_LSTM(nn.Module):
@@ -149,10 +153,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Global variables
+MODEL = None
+TF = None
+DATASET_INFO = None
+
 # Preload model & transforms on startup to avoid per-request overhead
 @app.on_event("startup")
 async def startup_event():
-    global MODEL, TF
+    global MODEL, TF, DATASET_INFO
     try:
         mpath = find_latest_model(SESSION_NAME)
     except FileNotFoundError as e:
@@ -164,6 +173,7 @@ async def startup_event():
     MODEL.load_state_dict(ckpt)
     MODEL.eval()
     TF = build_transforms()
+    DATASET_INFO = load_dataset_info(SESSION_NAME)
     print(f"[STARTUP] Loaded model {mpath}")
 
 # ─────────────────── Prediction Endpoint ───────────────────
@@ -207,6 +217,23 @@ async def predict(params: PredictParams = Depends()):
     with torch.no_grad():
         prediction = MODEL(imgs).item()
 
+    # Load dataset info if not already loaded
+    dataset_info = DATASET_INFO
+    if not dataset_info and params.session != SESSION_NAME:
+        dataset_info = load_dataset_info(params.session)
+
+    # Try to find ground truth
+    ground_truth = None
+    percent_change = None
+    
+    last_file = os.path.basename(seq_files[-1])
+    if dataset_info:
+        matched_metadata = next((entry for entry in dataset_info if entry['new_filename'] in last_file), None)
+        if matched_metadata:
+            ground_truth = float(matched_metadata[TARGET_VARIABLE])
+            if ground_truth != 0:  # Avoid division by zero
+                percent_change = (prediction - ground_truth) / abs(ground_truth) * 100
+
     return PredictResponse(
         session=params.session,
         used_model=os.path.basename(model_path),
@@ -215,9 +242,9 @@ async def predict(params: PredictParams = Depends()):
         predictions=[{
             "frame": 1,
             "prediction": prediction,
-            "ground_truth": None,
-            "percent_change": None,
-            "timestamp": parse_timestamp(seq_files[0]).isoformat(),
+            "ground_truth": ground_truth,
+            "percent_change": percent_change,
+            "timestamp": parse_timestamp(seq_files[-1]).isoformat(),
         }],
         frames_used=len(seq_files)
     )
@@ -249,34 +276,62 @@ async def predict_multiple(params: PredictParams = Depends()):
     else:
         end_idx = len(snaps) - 1
 
-    start_idx = max(0, end_idx - params.frames + 1)
-    seq_files = snaps[start_idx:end_idx+1]
-    if params.end_file and len(seq_files) < params.frames:
-        raise HTTPException(400, f"Only {len(seq_files)} frames available for requested end-file")
+    # Load dataset info if not already loaded
+    dataset_info = DATASET_INFO
+    if not dataset_info and params.session != SESSION_NAME:
+        dataset_info = load_dataset_info(params.session)
 
-    # 4) Load & preprocess images
-    imgs = torch.stack([
-        TF(Image.open(fp).convert("RGB")) for fp in seq_files
-    ]).unsqueeze(0)  # [1,T,3,224,224]
-
-    # 5) Inference & generate predictions for each frame before the last one
+    # Make predictions for multiple timeframes
     predictions = []
-    for i in range(len(seq_files)):  # run prediction for each snapshot
-        with torch.no_grad():
-            prediction = MODEL(imgs[:, i:i+1, :, :, :]).item()
-            # Get ground truth from the target variable (either `change_percent_step` or `change_percent_hour`)
-            matched_metadata = next((entry for entry in dataset_info if entry['new_filename'] in os.path.basename(seq_files[i])), None)
-            if matched_metadata:
-                ground_truth = float(matched_metadata[TARGET_VARIABLE])  # Using change_percent_step or change_percent_hour
-                percent_change = (prediction - ground_truth) / ground_truth * 100  # Example of calculating the percentage change
+    
+    # For each potential end point (going backwards from the end frame)
+    for i in range(min(params.frames, end_idx + 1)):
+        current_end_idx = end_idx - i
+        current_start_idx = max(0, current_end_idx - params.frames + 1)
+        
+        # Skip if we don't have enough frames
+        if current_end_idx - current_start_idx + 1 < 2:  # Need at least 2 frames for LSTM
+            continue
+            
+        current_seq_files = snaps[current_start_idx:current_end_idx+1]
+        
+        # Load & preprocess images for this sequence
+        try:
+            current_imgs = torch.stack([
+                TF(Image.open(fp).convert("RGB")) for fp in current_seq_files
+            ]).unsqueeze(0)  # [1,T,3,224,224]
+            
+            # Make prediction
+            with torch.no_grad():
+                prediction = MODEL(current_imgs).item()
                 
-                predictions.append({
-                    "frame": i+1,
-                    "prediction": prediction,
-                    "ground_truth": ground_truth,
-                    "percent_change": percent_change,
-                    "timestamp": parse_timestamp(seq_files[i]).isoformat(),
-                })
+            # Find ground truth for this timeframe if available
+            ground_truth = None
+            percent_change = None
+            current_file = os.path.basename(current_seq_files[-1])
+            
+            if dataset_info:
+                matched_metadata = next((entry for entry in dataset_info if entry['new_filename'] in current_file), None)
+                if matched_metadata:
+                    ground_truth = float(matched_metadata[TARGET_VARIABLE])
+                    if ground_truth != 0:  # Avoid division by zero
+                        percent_change = (prediction - ground_truth) / abs(ground_truth) * 100
+            
+            predictions.append({
+                "frame": i+1,
+                "prediction": prediction,
+                "ground_truth": ground_truth,
+                "percent_change": percent_change,
+                "timestamp": parse_timestamp(current_seq_files[-1]).isoformat(),
+                "images_used": len(current_seq_files)
+            })
+            
+        except Exception as e:
+            print(f"Error processing frame {i+1}: {str(e)}")
+            continue
+
+    if not predictions:
+        raise HTTPException(400, "Could not generate any predictions")
 
     return PredictResponse(
         session=params.session,
@@ -284,5 +339,5 @@ async def predict_multiple(params: PredictParams = Depends()):
         model_name=params.backbone,
         target_variable=TARGET_VARIABLE,
         predictions=predictions,
-        frames_used=len(seq_files)
+        frames_used=params.frames
     )
