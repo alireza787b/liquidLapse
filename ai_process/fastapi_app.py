@@ -48,7 +48,7 @@ DEFAULT_LAYERS   = 1
 DEFAULT_DROPOUT  = 0.25
 
 # Define the prediction target variable: `change_percent_step` or `change_percent_hour`
-TARGET_VARIABLE = "change_percent_step"  # Change this to "change_percent_hour" for hourly predictions
+TARGET_VARIABLE = "change_percent_hour"  # Change this to "change_percent_hour" for hourly predictions
 # ╰──────────────────────────────────────────────╯
 
 # ─────────────────── Pydantic Schemas ───────────────────
