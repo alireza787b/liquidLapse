@@ -11,7 +11,7 @@ Author: Alireza Ghaderi  ·  Updated 2025-05-09
 
 # ╭─────────────────── GLOBAL CONFIG (edit as needed) ─────────────────╮
 SESSION_NAME        = "test1"               # which ai_process/ session
-BACKBONE_NAME       = "inception_v3"            # any model in torchvision.models
+BACKBONE_NAME       = "googlenet"            # any model in torchvision.models
 FREEZE_BACKBONE     = True                  # freeze CNN during LSTM training?
 LSTM_HIDDEN         = 128                   # LSTM hidden size
 LSTM_LAYERS         = 1                     # number of stacked LSTM layers
@@ -84,7 +84,7 @@ def build_backbone(backbone_name: str, freeze: bool = True):
     
     # Special handling for Inception_v3 and other models with aux_logits
     if backbone_name == "inception_v3":
-        model = getattr(models, backbone_name)(weights=weights, aux_logits=False)
+        model = getattr(models, backbone_name)(weights=weights, aux_logits=True)
     else:
         model = getattr(models, backbone_name)(weights=weights)
 
