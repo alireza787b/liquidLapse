@@ -11,7 +11,7 @@ Author: Alireza Ghaderi  ·  Updated 2025-05-09
 
 # ╭─────────────────── GLOBAL CONFIG (edit as needed) ─────────────────╮
 SESSION_NAME        = "test1"               # which ai_process/ session
-BACKBONE_NAME       = "inceptionv3"            # any model in torchvision.models
+BACKBONE_NAME       = "inception_v3"            # any model in torchvision.models
 FREEZE_BACKBONE     = True                  # freeze CNN during LSTM training?
 LSTM_HIDDEN         = 128                   # LSTM hidden size
 LSTM_LAYERS         = 1                     # number of stacked LSTM layers
