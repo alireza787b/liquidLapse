@@ -34,6 +34,7 @@ from pydantic import BaseModel
 from torchvision import models, transforms
 from PIL import Image
 import torch.nn as nn
+import json
 
 # ╭─────────── DEFAULT CONFIGURATION ────────────╮
 SESSION_NAME     = "test1"
@@ -47,7 +48,7 @@ DEFAULT_LAYERS   = 1
 DEFAULT_DROPOUT  = 0.25
 
 # Define the prediction target variable: `change_percent_step` or `change_percent_hour`
-TARGET_VARIABLE = "change_percent_hour"  # Change this to "change_percent_hour" for hourly predictions
+TARGET_VARIABLE = "change_percent_step"  # Change this to "change_percent_hour" for hourly predictions
 # ╰──────────────────────────────────────────────╯
 
 # ─────────────────── Pydantic Schemas ───────────────────
@@ -104,6 +105,10 @@ def build_transforms():
         transforms.Normalize([0.485,0.456,0.406],
                              [0.229,0.224,0.225])
     ])
+
+# Load the dataset_info.json file into memory
+with open('dataset_info.json', 'r') as f:
+    dataset_info = json.load(f)
 
 # ─────────────────── Model Definition ───────────────────
 class CNN_LSTM(nn.Module):
@@ -258,16 +263,18 @@ async def predict_multiple(params: PredictParams = Depends()):
         with torch.no_grad():
             prediction = MODEL(imgs[:, i:i+1, :, :, :]).item()
             # Get ground truth from the target variable (either `change_percent_step` or `change_percent_hour`)
-            ground_truth = float(seq_files[i+1][TARGET_VARIABLE])  # Assuming the next change is the ground truth
-            percent_change = (prediction - ground_truth) / ground_truth * 100  # Example of calculating the percentage change
-            
-            predictions.append({
-                "frame": i+1,
-                "prediction": prediction,
-                "ground_truth": ground_truth,
-                "percent_change": percent_change,
-                "timestamp": parse_timestamp(seq_files[i]).isoformat(),
-            })
+            matched_metadata = next((entry for entry in dataset_info if entry['new_filename'] in os.path.basename(seq_files[i])), None)
+            if matched_metadata:
+                ground_truth = float(matched_metadata[TARGET_VARIABLE])  # Using change_percent_step or change_percent_hour
+                percent_change = (prediction - ground_truth) / ground_truth * 100  # Example of calculating the percentage change
+                
+                predictions.append({
+                    "frame": i+1,
+                    "prediction": prediction,
+                    "ground_truth": ground_truth,
+                    "percent_change": percent_change,
+                    "timestamp": parse_timestamp(seq_files[i]).isoformat(),
+                })
 
     # Handle the last frame (no ground truth available)
     last_prediction = MODEL(imgs[:, -1:, :, :, :]).item()
