@@ -11,7 +11,7 @@ FREEZE_BACKBONE     = True                  # True = freeze CNN weights
 LSTM_HIDDEN         = 128                   # hidden size of LSTM
 LSTM_LAYERS         = 1                     # number of stacked LSTM layers
 REG_DROPOUT         = 0.25                  # dropout before final FC (0 = none)
-TARGET_FIELD        = "change_percent_step" # field in future_prediction JSON
+TARGET_FIELD        = "change_percent_hour" # field in future_prediction JSON
 TRAIN_SPLIT         = 0.8                   # fraction for training set
 VAL_SPLIT           = 0.2                   # fraction for validation set
 BATCH_SIZE          = 4                     # batch size per GPU :contentReference[oaicite:1]{index=1}
