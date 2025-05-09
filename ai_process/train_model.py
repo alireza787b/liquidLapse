@@ -31,11 +31,12 @@ import os, json, csv, math, time, datetime, sys, warnings
 import torch, torch.nn as nn
 from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import models
-from torchvision.models.feature_extraction import create_feature_extractor   # :contentReference[oaicite:3]{index=3}
-from torchvision.models import get_model_weights                              # :contentReference[oaicite:4]{index=4}
+from torchvision.models.feature_extraction import create_feature_extractor
+from torchvision.models import get_model_weights
 from PIL import Image
 from termcolor import cprint
 from torchvision.models.feature_extraction import get_graph_node_names
+
 # ──────────── Paths ────────────
 BASE_DIR   = os.path.expanduser("~/liquidLapse")
 SEQ_JSON   = f"ai_process/{SESSION_NAME}/sequences/sequences_info.json"
@@ -65,11 +66,12 @@ class HeatmapSeqDataset(Dataset):
 
 # ──────────── Backbone helper ────────────
 
+def warn(msg): cprint(f"[WARNING] {msg}", "yellow")
 
 def build_backbone(backbone_name: str, freeze: bool = True):
     """
     Build a backbone that returns the tensor *just before* the main classifier,
-    no matter what the model’s internal module naming scheme is.
+    no matter what the model's internal module naming scheme is.
 
     Returns:
         feat_extractor : nn.Module
@@ -77,32 +79,81 @@ def build_backbone(backbone_name: str, freeze: bool = True):
         transform      : callable   – default preprocessing pipeline
         input_size     : tuple(H,W)
     """
-    weights_enum = get_model_weights(backbone_name)          # tv>=0.15
+    weights_enum = get_model_weights(backbone_name)
     weights      = weights_enum.DEFAULT
-    model        = getattr(models, backbone_name)(weights=weights)
+    
+    # Special handling for Inception_v3 and other models with aux_logits
+    if backbone_name == "inception_v3":
+        model = getattr(models, backbone_name)(weights=weights, aux_logits=False)
+    else:
+        model = getattr(models, backbone_name)(weights=weights)
 
-    # ➊ Get the graph node names for eval-mode
-    eval_nodes, _ = get_graph_node_names(model)              # list[str]
-    # ➋ Classifier node is *last* node that produces (batch, num_classes)
-    #    We find its index, then take the node right before it.
-    cls_index = next(
-        (i for i, n in reversed(list(enumerate(eval_nodes)))
-         if "classifier" in n or n.endswith(".fc") or n.endswith(".head") or "logits" in n),
-        len(eval_nodes) - 1
-    )
-    feature_node = eval_nodes[cls_index - 1]                 # robust pick
+    # Get graph node names for the model
+    eval_nodes, _ = get_graph_node_names(model)
 
-    # ➌ Build feature extractor
-    feat_extractor = create_feature_extractor(
-        model, return_nodes={feature_node: "features"}
-    )
+    # Model-specific feature extraction approach
+    if backbone_name == "inception_v3":
+        # For Inception v3, the feature layer is typically before avgpool
+        feature_node = "avgpool" 
+    else:
+        # For other models, find the node right before classifier/fc/head
+        excluded_terms = ["classifier", ".fc", ".head", "logits", "aux", "AuxLogits"]
+        
+        # Find the last layer before any classifier-like nodes
+        cls_index = -1
+        for i, node in reversed(list(enumerate(eval_nodes))):
+            if any(term in node for term in excluded_terms):
+                cls_index = i
+                break
+        
+        if cls_index > 0:
+            feature_node = eval_nodes[cls_index - 1]
+        else:
+            # Fallback to the last node if no classifier found
+            feature_node = eval_nodes[-2] if len(eval_nodes) > 1 else eval_nodes[-1]
+            warn(f"Couldn't identify classifier node for {backbone_name}, using {feature_node}")
+
+    # Create feature extractor with identified node
+    try:
+        feat_extractor = create_feature_extractor(
+            model, return_nodes={feature_node: "features"}
+        )
+    except ValueError as e:
+        # If the first attempt fails, try a different approach for problematic models
+        cprint(f"Error with '{feature_node}', falling back to alternative extraction.", "yellow")
+        
+        # Alternative approach: use a reliable intermediate layer
+        # Common layers across most CNN architectures
+        fallback_layers = ["flatten", "avgpool", "adaptive_avgpool", "AdaptiveAvgPool2d"]
+        
+        # Find a suitable fallback layer
+        for node in reversed(eval_nodes):
+            if any(layer in node.lower() for layer in fallback_layers):
+                feature_node = node
+                break
+        else:
+            # Last resort: use the layer just before the end
+            feature_node = eval_nodes[-2] if len(eval_nodes) > 1 else eval_nodes[0]
+        
+        cprint(f"Using fallback feature node: {feature_node}", "yellow")
+        feat_extractor = create_feature_extractor(
+            model, return_nodes={feature_node: "features"}
+        )
+
+    # Freeze backbone if specified
     if freeze:
-        for p in feat_extractor.parameters(): p.requires_grad = False
+        for p in feat_extractor.parameters(): 
+            p.requires_grad = False
 
-    # ➍ Infer feature dimension with a dummy forward
+    # Infer feature dimension with a dummy forward pass
     dummy = torch.zeros(1, 3, *weights.meta["min_size"])
     with torch.no_grad():
-        feat_dim = feat_extractor(dummy)["features"].view(1, -1).shape[1]
+        feat_output = feat_extractor(dummy)["features"]
+        # Handle both flattened and spatial features
+        if len(feat_output.shape) > 2:  # If output is [B, C, H, W]
+            feat_dim = feat_output.flatten(1).shape[1]
+        else:  # Already flattened [B, D]
+            feat_dim = feat_output.shape[1]
 
     return feat_extractor, feat_dim, weights.transforms(), weights.meta["min_size"]
 
@@ -113,27 +164,44 @@ class CNN_LSTM(nn.Module):
         super().__init__()
         self.features, feat_dim, _, _ = build_backbone(backbone_name, freeze)
         self.lstm = nn.LSTM(feat_dim, hidden, layers, batch_first=True)
-        head = [nn.Linear(hidden,64), nn.ReLU()]
+        self.flatten = nn.Flatten()  # Explicit flatten layer
+        
+        head = [nn.Linear(hidden, 64), nn.ReLU()]
         if dropout: head.append(nn.Dropout(dropout))
-        head.append(nn.Linear(64,1))
+        head.append(nn.Linear(64, 1))
         self.regressor = nn.Sequential(*head)
 
         # expose sizes for reporting
-        self._feat_dim   = feat_dim
-        self._lstm_hid   = hidden
-        self._lstm_layers= layers
+        self._feat_dim    = feat_dim
+        self._lstm_hid    = hidden
+        self._lstm_layers = layers
 
     def forward(self, x):            # x: [B,T,3,H,W]
-        B,T,_,H,W = x.shape
-        feats = self.features(x.view(B*T,3,H,W))["features"].view(B,T,-1)
-        out,_  = self.lstm(feats)
-        return self.regressor(out[:,-1]).squeeze(1)
+        B, T, C, H, W = x.shape
+        
+        # Process each frame through CNN backbone
+        feats_list = []
+        for t in range(T):
+            feat = self.features(x[:, t])["features"]
+            # Handle any remaining spatial dimensions
+            if len(feat.shape) > 2:
+                feat = self.flatten(feat)
+            feats_list.append(feat)
+        
+        # Stack time dimension
+        feats = torch.stack(feats_list, dim=1)  # [B,T,D]
+        
+        # Process through LSTM
+        out, _ = self.lstm(feats)
+        
+        # Take final time step for prediction
+        return self.regressor(out[:, -1]).squeeze(1)
 
 # ──────────── Train / Validate step ────────────
 def step(model, loader, loss_fn, optim=None, device="cpu"):
     training = optim is not None
     model.train() if training else model.eval()
-    total=0.0
+    total = 0.0
     for X, y in loader:
         X, y = X.to(device), y.to(device)
         if training: optim.zero_grad()
@@ -141,7 +209,7 @@ def step(model, loader, loss_fn, optim=None, device="cpu"):
         loss = loss_fn(pred, y)
         if training:
             loss.backward(); optim.step()
-        total += loss.item()*X.size(0)
+        total += loss.item() * X.size(0)
     return total / len(loader.dataset)
 
 # ──────────── Main ────────────
@@ -154,17 +222,37 @@ def main():
     cprint(f"Using device: {device}", "cyan")
 
     # Backbone + transform
-    backbone, feat_dim, tf, in_size = build_backbone(BACKBONE_NAME, FREEZE_BACKBONE)
-    cprint(f"Backbone: {BACKBONE_NAME}  |  input {in_size}  |  feature-dim {feat_dim}", "green")
+    try:
+        backbone, feat_dim, tf, in_size = build_backbone(BACKBONE_NAME, FREEZE_BACKBONE)
+        cprint(f"Backbone: {BACKBONE_NAME}  |  input {in_size}  |  feature-dim {feat_dim}", "green")
+    except Exception as e:
+        cprint(f"Error building backbone: {str(e)}", "red")
+        cprint("Available backbones:", "cyan")
+        available_models = [name for name in dir(models) 
+                            if callable(getattr(models, name)) and name[0].islower()]
+        for name in sorted(available_models):
+            try:
+                # Check if this is actually a model function
+                if hasattr(models, name) and callable(getattr(models, name)):
+                    weights_enum = get_model_weights(name)
+                    if hasattr(weights_enum, 'DEFAULT'):
+                        cprint(f"  - {name}", "green")
+            except:
+                pass
+        return
 
     # Dataset / splits
-    ds = HeatmapSeqDataset(SEQ_JSON, tf)
-    n = len(ds)
-    n_train, n_val = int(TRAIN_SPLIT*n), int(VAL_SPLIT*n)
-    n_test = n - n_train - n_val
-    train_ds, val_ds, test_ds = random_split(ds, [n_train,n_val,n_test],
-                                             generator=torch.Generator().manual_seed(42))
-    cprint(f"Dataset: {n} sequences  (train {n_train}  val {n_val}  test {n_test})", "yellow")
+    try:
+        ds = HeatmapSeqDataset(SEQ_JSON, tf)
+        n = len(ds)
+        n_train, n_val = int(TRAIN_SPLIT*n), int(VAL_SPLIT*n)
+        n_test = n - n_train - n_val
+        train_ds, val_ds, test_ds = random_split(ds, [n_train,n_val,n_test],
+                                                generator=torch.Generator().manual_seed(42))
+        cprint(f"Dataset: {n} sequences  (train {n_train}  val {n_val}  test {n_test})", "yellow")
+    except Exception as e:
+        cprint(f"Error loading dataset: {str(e)}", "red")
+        return
 
     dl_train = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,  drop_last=True)
     dl_val   = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False, drop_last=False)
@@ -177,7 +265,7 @@ def main():
     # Optional torchinfo summary
     if VISUALIZE_MODEL:
         try:
-            from torchinfo import summary                                   # :contentReference[oaicite:7]{index=7}
+            from torchinfo import summary
             summary(model, input_size=(BATCH_SIZE, len(ds[0][0]), 3, *in_size))
         except ImportError:
             warn("Install torchinfo for prettier model summaries.")
