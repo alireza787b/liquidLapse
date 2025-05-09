@@ -107,7 +107,8 @@ def build_transforms():
     ])
 
 # Load the dataset_info.json file into memory
-dataset_path = os.path.join(MODEL_BASE_DIR, 'dataset_info.json')
+test_path = os.path.join(MODEL_BASE_DIR,SESSION_NAME)
+dataset_path = os.path.join(test_path, 'dataset_info.json')
 with open(dataset_path, 'r') as f:
     dataset_info = json.load(f)
 
