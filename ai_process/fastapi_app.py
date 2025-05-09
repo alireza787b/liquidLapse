@@ -153,6 +153,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Schema for debug info
+class DebugInfo(BaseModel):
+    dataset_size: int
+    dataset_samples: List[dict]
+    heatmap_files: List[str]
+    match_results: List[dict]
+
 # Global variables
 MODEL = None
 TF = None
@@ -175,6 +182,15 @@ async def startup_event():
     TF = build_transforms()
     DATASET_INFO = load_dataset_info(SESSION_NAME)
     print(f"[STARTUP] Loaded model {mpath}")
+    
+    # Print dataset info summary for debugging
+    if DATASET_INFO:
+        print(f"[STARTUP] Loaded {len(DATASET_INFO)} dataset entries")
+        # Print a few examples of filenames in the dataset
+        for i, entry in enumerate(DATASET_INFO[:3]):
+            print(f"[DATASET] Sample {i}: {entry['new_filename']}")
+    else:
+        print("[WARNING] No dataset info loaded")
 
 # ─────────────────── Prediction Endpoint ───────────────────
 @app.get("/predict", response_model=PredictResponse)
@@ -228,7 +244,40 @@ async def predict(params: PredictParams = Depends()):
     
     last_file = os.path.basename(seq_files[-1])
     if dataset_info:
-        matched_metadata = next((entry for entry in dataset_info if entry['new_filename'] in last_file), None)
+        # Extract date and time from the filename to match with dataset_info
+        timestamp_match = re.search(r"heatmap_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})_", last_file)
+        if timestamp_match:
+            date_str = timestamp_match.group(1).replace("-", "")  # Convert 2025-04-01 to 20250401
+            time_str = timestamp_match.group(2)  # Keep 03-50-56 format
+            
+            # Try matching on timestamp components
+            matched_metadata = next(
+                (entry for entry in dataset_info 
+                 if date_str in entry['new_filename'] and time_str in entry['new_filename']),
+                None
+            )
+            
+            if not matched_metadata:
+                # Fallback: try to extract timestamp and match by closest timestamp
+                dt_str = f"{timestamp_match.group(1)} {timestamp_match.group(2).replace('-',':')}"
+                current_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+                current_ts = current_dt.timestamp()
+                
+                # Find closest entry by timestamp
+                closest_entry = None
+                min_diff = float('inf')
+                
+                for entry in dataset_info:
+                    if 'unix_timestamp' in entry:
+                        diff = abs(entry['unix_timestamp'] - current_ts)
+                        if diff < min_diff:
+                            min_diff = diff
+                            closest_entry = entry
+                            
+                # Only use if within 5 minutes (300 seconds)
+                if closest_entry and min_diff <= 300:
+                    matched_metadata = closest_entry
+        
         if matched_metadata:
             ground_truth = float(matched_metadata[TARGET_VARIABLE])
             if ground_truth != 0:  # Avoid division by zero
@@ -374,4 +423,62 @@ async def predict_multiple(params: PredictParams = Depends()):
         target_variable=TARGET_VARIABLE,
         predictions=predictions,
         frames_used=params.frames
+    )
+    
+# ─────────────────── Debug Endpoint ───────────────────
+@app.get("/debug", response_model=DebugInfo)
+async def debug_info(session: str = SESSION_NAME):
+    """Debug endpoint to check dataset and file matching"""
+    # Load dataset info
+    dataset_info = DATASET_INFO
+    if not dataset_info and session != SESSION_NAME:
+        dataset_info = load_dataset_info(session)
+    
+    # Get snapshot filenames
+    snaps = list_snapshots(HEATMAP_DIR)
+    heatmap_files = [os.path.basename(f) for f in snaps[:5]]  # Just show first 5
+    
+    # Test matching logic
+    match_results = []
+    for idx, filename in enumerate(heatmap_files):
+        timestamp_match = re.search(r"heatmap_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})_", filename)
+        if timestamp_match:
+            date_str = timestamp_match.group(1).replace("-", "")
+            time_str = timestamp_match.group(2)
+            
+            # Direct match
+            direct_match = next(
+                (entry['new_filename'] for entry in dataset_info 
+                 if date_str in entry['new_filename'] and time_str in entry['new_filename']),
+                None
+            )
+            
+            # Timestamp match
+            dt_str = f"{timestamp_match.group(1)} {timestamp_match.group(2).replace('-',':')}"
+            current_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+            current_ts = current_dt.timestamp()
+            
+            closest_entry = None
+            min_diff = float('inf')
+            for entry in dataset_info:
+                if 'unix_timestamp' in entry:
+                    diff = abs(entry['unix_timestamp'] - current_ts)
+                    if diff < min_diff:
+                        min_diff = diff
+                        closest_entry = entry
+            
+            match_results.append({
+                "filename": filename,
+                "extracted_date": date_str,
+                "extracted_time": time_str,
+                "direct_match": direct_match,
+                "closest_match": closest_entry['new_filename'] if closest_entry else None,
+                "time_diff_seconds": min_diff if closest_entry else None
+            })
+    
+    return DebugInfo(
+        dataset_size=len(dataset_info) if dataset_info else 0,
+        dataset_samples=dataset_info[:3] if dataset_info else [],
+        heatmap_files=heatmap_files,
+        match_results=match_results
     )
