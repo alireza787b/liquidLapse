@@ -53,7 +53,7 @@ class HeatmapSeqDataset(Dataset):
     def __getitem__(self, idx):
         seq = self.meta[idx]
         # load T images, apply transforms
-        imgs = torch.stack([ self.tf(Image.open(it["image_path"]).convert("RGB"))
+        imgs = torch.stack([ self.tf(Image.open(it["original_path"]).convert("RGB"))
                              for it in seq["items"] ])  # [T,3,224,224]
         # numeric target
         y = float(seq["future_prediction"][TARGET_FIELD])
