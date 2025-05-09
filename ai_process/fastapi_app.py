@@ -261,7 +261,7 @@ async def predict_multiple(params: PredictParams = Depends()):
 
     # 5) Inference & generate predictions for each frame before the last one
     predictions = []
-    for i in range(len(seq_files)-1):  # excluding the last frame for comparison
+    for i in range(len(seq_files)):  # run prediction for each snapshot
         with torch.no_grad():
             prediction = MODEL(imgs[:, i:i+1, :, :, :]).item()
             # Get ground truth from the target variable (either `change_percent_step` or `change_percent_hour`)
@@ -277,16 +277,6 @@ async def predict_multiple(params: PredictParams = Depends()):
                     "percent_change": percent_change,
                     "timestamp": parse_timestamp(seq_files[i]).isoformat(),
                 })
-
-    # Handle the last frame (no ground truth available)
-    last_prediction = MODEL(imgs[:, -1:, :, :, :]).item()
-    predictions.append({
-        "frame": len(seq_files),
-        "prediction": last_prediction,
-        "ground_truth": None,
-        "percent_change": None,
-        "timestamp": parse_timestamp(seq_files[-1]).isoformat(),
-    })
 
     return PredictResponse(
         session=params.session,
