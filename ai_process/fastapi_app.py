@@ -259,7 +259,7 @@ async def predict_multiple(params: PredictParams = Depends()):
         TF(Image.open(fp).convert("RGB")) for fp in seq_files
     ]).unsqueeze(0)  # [1,T,3,224,224]
 
-    # 5) Inference & generate predictions for all frames
+    # 5) Inference & generate predictions for each frame before the last one
     predictions = []
     for i in range(len(seq_files)-1):  # excluding the last frame for comparison
         with torch.no_grad():
