@@ -311,11 +311,45 @@ async def predict_multiple(params: PredictParams = Depends()):
             current_file = os.path.basename(current_seq_files[-1])
             
             if dataset_info:
-                matched_metadata = next((entry for entry in dataset_info if entry['new_filename'] in current_file), None)
+                # Extract date and time from the filename to match with dataset_info
+                timestamp_match = re.search(r"heatmap_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})_", current_file)
+                if timestamp_match:
+                    date_str = timestamp_match.group(1).replace("-", "")  # Convert 2025-04-01 to 20250401
+                    time_str = timestamp_match.group(2)  # Keep 03-50-56 format
+                    
+                    # Try matching on timestamp components
+                    matched_metadata = next(
+                        (entry for entry in dataset_info 
+                         if date_str in entry['new_filename'] and time_str in entry['new_filename']),
+                        None
+                    )
+                    
+                    if not matched_metadata:
+                        # Fallback: try to extract timestamp and match by closest timestamp
+                        dt_str = f"{timestamp_match.group(1)} {timestamp_match.group(2).replace('-',':')}"
+                        current_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+                        current_ts = current_dt.timestamp()
+                        
+                        # Find closest entry by timestamp
+                        closest_entry = None
+                        min_diff = float('inf')
+                        
+                        for entry in dataset_info:
+                            if 'unix_timestamp' in entry:
+                                diff = abs(entry['unix_timestamp'] - current_ts)
+                                if diff < min_diff:
+                                    min_diff = diff
+                                    closest_entry = entry
+                                    
+                        # Only use if within 5 minutes (300 seconds)
+                        if closest_entry and min_diff <= 300:
+                            matched_metadata = closest_entry
+                
                 if matched_metadata:
                     ground_truth = float(matched_metadata[TARGET_VARIABLE])
                     if ground_truth != 0:  # Avoid division by zero
                         percent_change = (prediction - ground_truth) / abs(ground_truth) * 100
+                    print(f"Matched {current_file} to {matched_metadata['new_filename']} with {ground_truth}")
             
             predictions.append({
                 "frame": i+1,
