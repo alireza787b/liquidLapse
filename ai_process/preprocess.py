@@ -49,7 +49,7 @@ from pathlib import Path
 DEFAULT_SOURCE_DIR = os.path.expanduser("~/liquidLapse/heatmap_snapshots")
 DEFAULT_AI_PROCESS_DIR = os.path.expanduser("~/liquidLapse/ai_process")
 DEFAULT_SESSION_NAME = "test1"
-HOUR_WINDOW_SECONDS = 3600  # Configurable hourly window in seconds
+HOUR_WINDOW_SECONDS = 36000  # Configurable hourly window in seconds
 
 # =============================================================================
 # Logging configuration for detailed output

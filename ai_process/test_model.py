@@ -54,7 +54,7 @@ import torch.nn as nn
 # ╭─────────────── DEFAULT CONFIG (can override here) ───────────────╮
 SESSION_NAME    = "test1"
 HEATMAP_DIR     = os.path.expanduser("~/liquidLapse/heatmap_snapshots")
-DEFAULT_FRAMES  = 10
+DEFAULT_FRAMES  = 110
 DEFAULT_DEVICE  = "cpu"
 DEFAULT_BACKBONE= "resnet18"
 DEFAULT_HIDDEN  = 128

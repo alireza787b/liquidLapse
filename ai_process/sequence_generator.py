@@ -7,7 +7,7 @@ from shutil import copyfile
 session_name = "test1"
 base_directory = os.path.expanduser("~/liquidLapse")
 data_source_path = os.path.join(base_directory, "heatmap_snapshots")
-sequence_length = 10  # Number of images per sequence
+sequence_length = 110  # Number of images per sequence
 sequence_folder = os.path.join(base_directory, f"ai_process/{session_name}/sequences")
 sequences_json_path = os.path.join(sequence_folder, "sequences_info.json")
 
