@@ -16,3 +16,5 @@ fastapi>=0.95            # web framework
 uvicorn[standard]>=0.22  # ASGI server
 pydantic>=2.0            # data validation
 python-multipart         # if you ever accept file uploads
+
+tqdm 
