@@ -12,7 +12,8 @@ Endpoints:
     - Returns JSON with session, checkpoint, config, frames_used, prediction, optional backtest error
 
 Usage:
-    uvicorn fastapi_app:app --reload --port 8100
+    uvicorn fastapi_app:app --reload --host 0.0.0.0 --port 8100
+
 
 Swagger UI: http://localhost:8100/docs
 """
