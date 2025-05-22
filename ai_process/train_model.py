@@ -1,183 +1,294 @@
 #!/usr/bin/env python3
 """
-CNN→LSTM trainer with detailed terminal reporting for BTC liquidity-heatmap sequences.
-Author: Alireza Ghaderi • 2025-05-02
+Automatic CNN→LSTM Trainer for Liquidity Heatmap Sequences
+
+Enhanced with real-time progress bars (tqdm) and TensorBoard logging for live monitoring.
+
+This script loads clean, fixed-length sequences and trains a CNN-LSTM regression model.
+All parameters are declared at the top as global defaults but can be overridden via CLI.
+Sequence length is inferred automatically from the JSON.
+After training, it saves both the model’s state_dict and its config parameters into a checkpoint.
+
+Usage:
+    python train_model.py [options]
+
+To monitor training in TensorBoard:
+    tensorboard --logdir=<base_dir>/ai_process/<session>/train_<timestamp>
+
+Upon saving, the checkpoint includes:
+  - "state_dict": model weights
+  - "config": dict of model constructor args + seq_len
+
+In testing, you can load this single checkpoint and reconstruct the exact model without re-specifying hyperparameters.
 """
+import os
+import json
+import math
+import datetime
+import time
+import argparse
 
-# ╭────────────────── GLOBAL CONFIG (edit here) ──────────────────╮
-SESSION_NAME        = "test1"               # which processed session to use
-BACKBONE_NAME       = "googlenet"            # torchvision.models.<name>
-FREEZE_BACKBONE     = True                  # True = freeze CNN weights
-LSTM_HIDDEN         = 128                   # hidden size of LSTM
-LSTM_LAYERS         = 1                     # number of stacked LSTM layers
-REG_DROPOUT         = 0.25                  # dropout before final FC (0 = none)
-TARGET_FIELD        = "change_percent_hour" # field in future_prediction JSON
-TRAIN_SPLIT         = 0.8                   # fraction for training set
-VAL_SPLIT           = 0.2                   # fraction for validation set
-BATCH_SIZE          = 4                     # batch size per GPU :contentReference[oaicite:1]{index=1}
-EPOCHS              = 30                    # maximum epochs
-LEARNING_RATE       = 1e-4                  # Adam LR (try 3e-4 or 1e-5) :contentReference[oaicite:2]{index=2}
-PATIENCE            = 5                     # early-stop patience :contentReference[oaicite:3]{index=3}
-GPU_DEVICE          = 0                     # -1=CPU or CUDA index
-VISUALIZE_MODEL     = True                  # print torchinfo + log TensorBoard graph
-# ╰───────────────────────────────────────────────────────────────╯
-
-import os, json, math, csv, datetime, time
-import torch, torch.nn as nn
+import torch
+import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.tensorboard import SummaryWriter
 from torchvision import models, transforms
+from tqdm.auto import tqdm
 from PIL import Image
 
-# ─────────────────────────── Paths ───────────────────────────
-BASE_DIR = os.path.expanduser("~/liquidLapse")
-SEQ_JSON = f"ai_process/{SESSION_NAME}/sequences/sequences_info.json"
-RUN_TS   = datetime.datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-RUN_DIR  = os.path.join(BASE_DIR, f"ai_process/{SESSION_NAME}/train_{RUN_TS}")
-os.makedirs(RUN_DIR, exist_ok=True)
+# =============================================================================
+# Global Defaults (modifiable here or via CLI)
+# =============================================================================
+DEFAULT_BASE_DIR        = os.path.expanduser("~/liquidLapse")
+DEFAULT_SESSION         = "test1"
+DEFAULT_SEQ_JSON_TMPL   = "ai_process/{session}/sequences/sequences_info.json"
+DEFAULT_BACKBONE        = "googlenet"
+DEFAULT_FREEZE_BACKBONE = True
+DEFAULT_LSTM_HIDDEN     = 128
+DEFAULT_LSTM_LAYERS     = 1
+DEFAULT_REG_DROPOUT     = 0.25
+DEFAULT_TARGET_FIELD    = "future_future_4h_change_percent"
+DEFAULT_TRAIN_SPLIT     = 0.8
+DEFAULT_VAL_SPLIT       = 0.1
+DEFAULT_BATCH_SIZE      = 4
+DEFAULT_EPOCHS          = 30
+DEFAULT_LR              = 1e-4
+DEFAULT_PATIENCE        = 5
+DEFAULT_GPU_DEVICE      = 0
+DEFAULT_VISUALIZE       = False
+DEFAULT_SEED            = 42
 
-# ───────────────────────── DataSet ────────────────────────────
-class HeatmapSeqDataset(Dataset):
-    """Loads sequences of heatmap images and their numeric targets."""
-    def __init__(self, json_path, tf=None):
-        with open(os.path.join(BASE_DIR, json_path),'r') as f:
+# =============================================================================
+# Dataset
+# =============================================================================
+class HeatmapSequenceDataset(Dataset):
+    """Loads sequences of images & numeric targets from JSON metadata."""
+    def __init__(self, json_path, target_field, transform=None):
+        with open(json_path, 'r') as f:
             meta = json.load(f)
-        # keep only entries with a defined future_prediction
-        self.meta = [m for m in meta if "future_prediction" in m]
-        self.tf = tf or transforms.Compose([
+        self.data = [m for m in meta if m.get(target_field) is not None]
+        self.target_field = target_field
+        self.transform = transform or transforms.Compose([
             transforms.Resize((224,224)),
             transforms.ToTensor(),
-            transforms.Normalize([0.485,0.456,0.406],
-                                 [0.229,0.224,0.225])
+            transforms.Normalize([0.485,0.456,0.406],[0.229,0.224,0.225])
         ])
-    def __len__(self): return len(self.meta)
-    def __getitem__(self, idx):
-        seq = self.meta[idx]
-        # load T images, apply transforms
-        imgs = torch.stack([ self.tf(Image.open(it["original_path"]).convert("RGB"))
-                             for it in seq["items"] ])  # [T,3,224,224]
-        # numeric target
-        y = float(seq["future_prediction"][TARGET_FIELD])
-        return imgs, torch.tensor(y, dtype=torch.float32)
+        self.seq_len = len(self.data[0]['items']) if self.data else 0
 
-# ─────────────────────────── Model ────────────────────────────
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        seq = self.data[idx]
+        imgs = []
+        for itm in seq['items']:
+            img_path = itm.get('image_path')
+            if img_path and os.path.exists(img_path):
+                try:
+                    img = Image.open(img_path).convert('RGB')
+                except Exception:
+                    img = Image.new('RGB',(224,224))
+            else:
+                img = Image.new('RGB',(224,224))
+            imgs.append(self.transform(img))
+        X = torch.stack(imgs)  # [T,3,H,W]
+        y = torch.tensor(float(seq[self.target_field]), dtype=torch.float32)
+        return X, y
+
+# =============================================================================
+# Model
+# =============================================================================
 class CNN_LSTM(nn.Module):
-    def __init__(self, backbone, hidden, layers, dropout, freeze=True):
+    def __init__(self, backbone, hidden, layers, dropout, freeze):
         super().__init__()
-        cnn = getattr(models, backbone)(weights="DEFAULT")  # transfer learning :contentReference[oaicite:4]{index=4}
-        self.features = nn.Sequential(*list(cnn.children())[:-1])  # global-avg pool output
+        cnn = getattr(models, backbone)(weights="DEFAULT")
+        self.features = nn.Sequential(*list(cnn.children())[:-1])
         feat_dim = cnn.fc.in_features
         if freeze:
-            for p in self.features.parameters(): p.requires_grad=False
+            for p in self.features.parameters():
+                p.requires_grad = False
         self.lstm = nn.LSTM(feat_dim, hidden, layers, batch_first=True)
-        head = [nn.Linear(hidden,64), nn.ReLU()]
-        if dropout>0: head.append(nn.Dropout(dropout))
-        head.append(nn.Linear(64,1))
+        head = [nn.Linear(hidden, hidden//2), nn.ReLU()]
+        if dropout > 0:
+            head.append(nn.Dropout(dropout))
+        head.append(nn.Linear(hidden//2, 1))
         self.regressor = nn.Sequential(*head)
-        # Store dims for reporting
-        self._feat_dim   = feat_dim
-        self._lstm_hid   = hidden
-        self._lstm_layers= layers
 
-    def forward(self, x):  # x: [B,T,3,H,W]
-        B,T,C,H,W = x.shape
-        x = x.view(B*T,C,H,W)
-        f = self.features(x).view(B,T,-1)  # [B,T,feat_dim]
-        out,_ = self.lstm(f)               # [B,T,hidden]
-        return self.regressor(out[:,-1]).squeeze(1)
+    def forward(self, x):
+        B, T, C, H, W = x.shape
+        x = x.view(B * T, C, H, W)
+        feats = self.features(x).view(B, T, -1)
+        out, _ = self.lstm(feats)
+        return self.regressor(out[:, -1, :]).squeeze(1)
 
-# ────────────────────── Training Utilities ──────────────────────
-def step(model, loader, loss_fn, optim=None, device="cpu"):
-    training = optim is not None
-    model.train() if training else model.eval()
-    total_loss=0.0
-    for X,y in loader:
-        X,y = X.to(device), y.to(device)
-        if training: optim.zero_grad()
+# =============================================================================
+# Training Utilities
+# =============================================================================
+def train_epoch(model, loader, loss_fn, optimizer, device):
+    """Train for one epoch, with tqdm progress bar and batch-level loss."""
+    model.train()
+    running_loss = 0.0
+    total = 0
+    bar = tqdm(loader, desc="Train", leave=False)
+    for X, y in bar:
+        X, y = X.to(device), y.to(device)
+        optimizer.zero_grad()
         preds = model(X)
-        loss  = loss_fn(preds, y)
-        if training:
-            loss.backward(); optim.step()
-        total_loss += loss.item()*X.size(0)
-    return total_loss/len(loader.dataset)
+        loss = loss_fn(preds, y)
+        loss.backward()
+        optimizer.step()
+        batch_size = X.size(0)
+        running_loss += loss.item() * batch_size
+        total += batch_size
+        bar.set_postfix(train_loss=(running_loss / total))
+    return running_loss / total
 
-# ─────────────────────────── Main ────────────────────────────
-def main():
-    # verify splits
-    assert 0<TRAIN_SPLIT<1 and 0<=VAL_SPLIT<1 and TRAIN_SPLIT+VAL_SPLIT<=1
+
+def eval_epoch(model, loader, loss_fn, device):
+    """Evaluate for one epoch, with tqdm progress bar."""
+    model.eval()
+    running_loss = 0.0
+    total = 0
+    bar = tqdm(loader, desc="Val  ", leave=False)
+    with torch.no_grad():
+        for X, y in bar:
+            X, y = X.to(device), y.to(device)
+            preds = model(X)
+            loss = loss_fn(preds, y)
+            batch_size = X.size(0)
+            running_loss += loss.item() * batch_size
+            total += batch_size
+            bar.set_postfix(val_loss=(running_loss / total))
+    return running_loss / total
+
+# =============================================================================
+# Main Training
+# =============================================================================
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Train CNN-LSTM on heatmap sequences.")
+    parser.add_argument('--base_dir',       type=str,   default=DEFAULT_BASE_DIR)
+    parser.add_argument('--session',        type=str,   default=DEFAULT_SESSION)
+    parser.add_argument('--target_field',   type=str,   default=DEFAULT_TARGET_FIELD)
+    parser.add_argument('--backbone',       type=str,   default=DEFAULT_BACKBONE)
+    parser.add_argument('--freeze_backbone',action='store_true', default=DEFAULT_FREEZE_BACKBONE)
+    parser.add_argument('--lstm_hidden',    type=int,   default=DEFAULT_LSTM_HIDDEN)
+    parser.add_argument('--lstm_layers',    type=int,   default=DEFAULT_LSTM_LAYERS)
+    parser.add_argument('--reg_dropout',    type=float, default=DEFAULT_REG_DROPOUT)
+    parser.add_argument('--train_split',    type=float, default=DEFAULT_TRAIN_SPLIT)
+    parser.add_argument('--val_split',      type=float, default=DEFAULT_VAL_SPLIT)
+    parser.add_argument('--batch_size',     type=int,   default=DEFAULT_BATCH_SIZE)
+    parser.add_argument('--epochs',         type=int,   default=DEFAULT_EPOCHS)
+    parser.add_argument('--lr',             type=float, default=DEFAULT_LR)
+    parser.add_argument('--patience',       type=int,   default=DEFAULT_PATIENCE)
+    parser.add_argument('--gpu_device',     type=int,   default=DEFAULT_GPU_DEVICE)
+    parser.add_argument('--visualize',      action='store_true', default=DEFAULT_VISUALIZE)
+    parser.add_argument('--seed',           type=int,   default=DEFAULT_SEED)
+    args = parser.parse_args()
+
+    # reproducibility
+    torch.manual_seed(args.seed)
+    if args.gpu_device >= 0 and torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+
+    # setup directories and TensorBoard
+    seq_json = os.path.join(args.base_dir, DEFAULT_SEQ_JSON_TMPL.format(session=args.session))
+    timestamp = datetime.datetime.now().strftime("%Y%m%dT%H%M%S")
+    run_dir = os.path.join(args.base_dir, f"ai_process/{args.session}/train_{timestamp}")
+    os.makedirs(run_dir, exist_ok=True)
+    writer = SummaryWriter(log_dir=run_dir)
 
     # device selection
-    device = (torch.device(f"cuda:{GPU_DEVICE}") 
-              if GPU_DEVICE>=0 and torch.cuda.is_available() 
-              else torch.device("cpu"))
-    print(f"[INFO] Using device: {device}")
+    device = (torch.device(f"cuda:{args.gpu_device}")
+              if args.gpu_device >= 0 and torch.cuda.is_available() else torch.device('cpu'))
+    print(f"[INFO] Device: {device}")
 
-    # load dataset
-    ds = HeatmapSeqDataset(SEQ_JSON)
-    N = len(ds)
-    n_train = int(TRAIN_SPLIT*N)
-    n_val   = int(VAL_SPLIT*N)
+    # data loading and splits
+    dataset = HeatmapSequenceDataset(seq_json, args.target_field)
+    N = len(dataset)
+    seq_len = dataset.seq_len
+    n_train = int(args.train_split * N)
+    n_val   = int(args.val_split   * N)
     n_test  = N - n_train - n_val
     train_ds, val_ds, test_ds = random_split(
-        ds, [n_train,n_val,n_test],
-        generator=torch.Generator().manual_seed(42)
+        dataset, [n_train, n_val, n_test],
+        generator=torch.Generator().manual_seed(args.seed)
     )
-    print(f"[DATA] total: {N}  train: {n_train}  val: {n_val}  test: {n_test}")
+    dl_train = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, drop_last=True)
+    dl_val   = DataLoader(val_ds,   batch_size=args.batch_size, shuffle=False)
 
-    # data loaders
-    dl_train = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True,  drop_last=True)
-    dl_val   = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False, drop_last=False)
+    print(f"[DATA] total={N}, train={len(train_ds)}, val={len(val_ds)}, test={len(test_ds)}, seq_len={seq_len}")
 
-    # build model
-    model = CNN_LSTM(BACKBONE_NAME, LSTM_HIDDEN, LSTM_LAYERS, REG_DROPOUT, FREEZE_BACKBONE).to(device)
-    loss_fn   = nn.MSELoss()
-    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
-                                 lr=LEARNING_RATE)
+    # model, loss, optimizer
+    model = CNN_LSTM(
+        args.backbone,
+        args.lstm_hidden,
+        args.lstm_layers,
+        args.reg_dropout,
+        args.freeze_backbone
+    ).to(device)
+    loss_fn = nn.MSELoss()
+    optimizer = torch.optim.Adam(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=args.lr
+    )
 
-    # report model details
-    print("\n[MODEL] Backbone:", BACKBONE_NAME)
-    print(f"        Feature dim: {model._feat_dim}")
-    print(f"        LSTM layers: {model._lstm_layers}  hidden: {model._lstm_hid}")
-    print("        Regressor head:", model.regressor, "\n")
-
-    # optional graph visualisation
-    if VISUALIZE_MODEL:
+    # optional model summary
+    if args.visualize:
         try:
             from torchinfo import summary
-            print(summary(model, input_size=(BATCH_SIZE,len(ds[0][0]),3,224,224)))
-            from torch.utils.tensorboard import SummaryWriter
-            tb = SummaryWriter(RUN_DIR)
-            dummy = torch.randn(BATCH_SIZE,len(ds[0][0]),3,224,224).to(device)
-            tb.add_graph(model, dummy); tb.close()
-            print(f"[TBOARD] tensorboard --logdir {RUN_DIR}")
+            print(summary(model, input_size=(args.batch_size, seq_len,3,224,224)))
         except ImportError:
-            print("[WARN] Install torchinfo/tensorboard to visualise model.")
+            print("[WARN] Install torchinfo for model summary.")
 
-    # training loop
-    best_val,wait=math.inf,0
-    log_csv = os.path.join(RUN_DIR,"train_log.csv")
-    with open(log_csv,"w",newline="") as logf:
-        writer = csv.writer(logf); writer.writerow(["epoch","train_loss","val_loss","time_s"])
-        print(f"\n[TRAIN] Starting training for up to {EPOCHS} epochs...\n")
-        for epoch in range(1, EPOCHS+1):
-            t0 = time.time()
-            tr_loss = step(model, dl_train, loss_fn, optimizer, device)
-            val_loss= step(model, dl_val,   loss_fn, None,      device)
-            dt = time.time()-t0
-            writer.writerow([epoch, f"{tr_loss:.4f}", f"{val_loss:.4f}", f"{dt:.1f}"])
-            print(f"Epoch {epoch:02d} | train {tr_loss:.4f} | val {val_loss:.4f} | {dt:.1f}s")
-            if val_loss < best_val:
-                best_val, wait = val_loss, 0
-                ckpt = os.path.join(RUN_DIR,"best_model.pt")
-                torch.save(model.state_dict(), ckpt)
-                print(f"  [SAVE] New best model (val={val_loss:.4f}) → {ckpt}")
-            else:
-                wait += 1
-                if wait >= PATIENCE:
-                    print(f"  [STOP] Early stopping after {epoch} epochs (no improvement).")
-                    break
+    # training loop with early stopping
+    best_val, wait = math.inf, 0
+    for epoch in range(1, args.epochs + 1):
+        t0 = time.time()
+        tr_loss = train_epoch(model, dl_train, loss_fn, optimizer, device)
+        va_loss = eval_epoch(model, dl_val,   loss_fn,      device)
+        epoch_time = time.time() - t0
+        eta = epoch_time * (args.epochs - epoch)
 
-    print(f"\n[DONE] Best val loss: {best_val:.4f}")
-    print(f"Outputs in: {RUN_DIR}\n")
+        # console summary
+        print(
+            f"Epoch {epoch}/{args.epochs} | "
+            f"train={tr_loss:.4f} | val={va_loss:.4f} | "
+            f"{epoch_time:.1f}s (ETA {eta/60:.1f}m)"
+        )
 
-if __name__ == "__main__":
-    main()
+        # log to TensorBoard
+        writer.add_scalar("Loss/train", tr_loss, epoch)
+        writer.add_scalar("Loss/val",   va_loss, epoch)
+        writer.flush()
+
+        # checkpointing & early stop
+        if va_loss < best_val:
+            best_val, wait = va_loss, 0
+            ckpt_path = os.path.join(run_dir, 'best_model.pt')
+            checkpoint = {
+                'state_dict': model.state_dict(),
+                'config': {
+                    'backbone': args.backbone,
+                    'freeze': args.freeze_backbone,
+                    'lstm_hidden': args.lstm_hidden,
+                    'lstm_layers': args.lstm_layers,
+                    'reg_dropout': args.reg_dropout,
+                    'seq_len': seq_len
+                }
+            }
+            torch.save(checkpoint, ckpt_path)
+            print(f"[SAVE] Checkpoint saved to {ckpt_path}")
+        else:
+            wait += 1
+            if wait >= args.patience:
+                print(f"[STOP] Early stopping at epoch {epoch}")
+                break
+
+    # test evaluation
+    if n_test > 0:
+        dl_test = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False)
+        test_loss = eval_epoch(model, dl_test, loss_fn, device)
+        print(f"[TEST] Test loss: {test_loss:.4f}")
+
+    writer.close()
+    print(f"[DONE] Best val loss: {best_val:.4f} | Outputs: {run_dir}")

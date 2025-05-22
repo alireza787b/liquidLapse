@@ -1,149 +1,200 @@
+#!/usr/bin/env python3
+"""
+Sequence Generator for Liquidity Heatmap Dataset
+
+This script takes the preprocessed dataset JSON (with timestamps, prices, change features,
+and built-in future-prediction fields) and builds clean, sliding-window sequences of metadata
+for model training (e.g., RNNs, Transformers), ensuring no null entries.
+
+Each sequence metadata includes:
+  - Sequence-level fields: sequence_id, start_time, end_time, last_item_id, last_timestamp, last_price, and future-prediction labels from the last item.
+  - An ordered list of items, each with index_in_sequence, id, timestamp, price, and image_path.
+
+Features:
+  - Configurable parameters at the top (paths, sequence length, save_images flag).
+  - Sliding-window generation with overlap: sequences start at each possible offset where a full window exists.
+  - Filters out any sequences containing invalid entries (missing id, price, or future labels).
+  - Automatically detects future-prediction fields in the dataset JSON.
+  - Optionally copies images into each sequence folder when `--save_images` is enabled; otherwise no directories are created.
+  - Outputs a master JSON (`sequences_info.json`) containing only complete sequences.
+
+Usage:
+    python generate_sequences.py \
+        --session test1 \
+        [--base_dir ~/liquidLapse] \
+        [--seq_len 110] \
+        [--save_images]
+"""
+
 import os
 import json
-from datetime import datetime, timedelta
-from shutil import copyfile
+import argparse
+from datetime import datetime
+from shutil import copy2
 
-# Parameters
-session_name = "test1"
-base_directory = os.path.expanduser("~/liquidLapse")
-data_source_path = os.path.join(base_directory, "heatmap_snapshots")
-sequence_length = 10  # Number of images per sequence
-sequence_folder = os.path.join(base_directory, f"ai_process/{session_name}/sequences")
-sequences_json_path = os.path.join(sequence_folder, "sequences_info.json")
+# =============================================================================
+# Configurable Parameters
+# =============================================================================
+DEFAULT_BASE_DIR       = os.path.expanduser("~/liquidLapse")
+DEFAULT_SESSION_NAME   = "test1"
 
-# Function to read dataset information
-def read_dataset_info(dataset_file):
-    dataset_file_path = os.path.join(base_directory, dataset_file)
-    with open(dataset_file_path, 'r') as f:
-        dataset_info = json.load(f)
-    
-    # Convert timestamp strings to datetime objects
-    for entry in dataset_info:
-        entry['timestamp'] = datetime.strptime(entry['timestamp'], '%Y-%m-%d %H:%M:%S')
-    
-    return dataset_info
+DATASET_JSON_REL       = "ai_process/{session}/dataset_info.json"
+SEQ_FOLDER_REL         = "ai_process/{session}/sequences"
+SEQUENCES_JSON_NAME    = "sequences_info.json"
 
-# Function to handle gaps in timestamps
-def handle_gaps(dataset_info):
-    timestamps = [entry['timestamp'] for entry in dataset_info]
-    timestamps.sort()  # Ensure timestamps are in chronological order
-    
-    start_time = timestamps[0]
-    end_time = timestamps[-1]
-    
-    expected_times = [start_time + timedelta(minutes=i*5) for i in range(len(dataset_info))]
-    
-    # Check for gaps
-    gaps = []
-    for i in range(1, len(expected_times)):
-        if expected_times[i] != timestamps[i]:
-            gaps.append((expected_times[i-1], expected_times[i]))
-    
-    # Interpolate or pad gaps
-    for gap_start, gap_end in gaps:
-        # Example: Linear interpolation
-        gap_duration = (gap_end - gap_start).total_seconds() / 60  # in minutes
-        num_steps = int(gap_duration / 5)  # Assuming 5 minutes interval
-        
-        interpolated_times = [gap_start + timedelta(minutes=i*5) for i in range(1, num_steps)]
-        
-        # Insert interpolated entries into dataset_info
-        for time in interpolated_times:
-            dataset_info.append({
-                'filename': None,  # Placeholder for missing filename
-                'timestamp': time,
-                'price': None  # Placeholder for missing price
-            })
-    
-    # Sort dataset_info by timestamp again
-    dataset_info.sort(key=lambda x: x['timestamp'])
-    
-    return dataset_info
+DEFAULT_SEQ_LEN        = 100        # Number of timesteps per sequence
+DEFAULT_SAVE_IMAGES    = False     # If False, no image folders or copies are created
 
-# Function to generate sequences
-def generate_sequences(dataset_info):
-    num_sequences = len(dataset_info) // sequence_length
-    sequences_info = []
-    
-    for i in range(num_sequences):
-        sequence_start = i * sequence_length
-        sequence_end = sequence_start + sequence_length
-        sequence_data = dataset_info[sequence_start:sequence_end]
-        
-        # Create sequence folder
-        sequence_folder_path = os.path.join(sequence_folder, f"sequence_{i+1}")
-        os.makedirs(sequence_folder_path, exist_ok=True)
-        
-        # Create images folder within sequence folder
-        images_folder_path = os.path.join(sequence_folder_path, "images")
-        os.makedirs(images_folder_path, exist_ok=True)
-        
-        # Save images (copy from data_source_path to images_folder_path)
-        sequence_items = []
-        for data_entry in sequence_data:
-            original_filepath = data_entry['original_filepath']
-            new_filename = data_entry['new_filename']
-            target_filepath = os.path.join(images_folder_path, f"{new_filename}.png")
-            
-            # Copy the image file
-            #copyfile(original_filepath, target_filepath)
-            
-            # Store sequence item information
-            sequence_items.append({
-                'filename': new_filename,
-                'price': data_entry['price'],
-                #'image_path': target_filepath,
-                'original_path': data_entry.get('target_filepath')  # Path from dataset source
-            })
-        
-        # Record sequence information
-        sequence_info = {
-            'sequence_id': i + 1,
-            'start_time': sequence_data[0]['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
-            'end_time': sequence_data[-1]['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
-            'items': sequence_items,
-            'sequence_folder': sequence_folder_path,
-            'session_folder': os.path.join(base_directory, f"ai_process/{session_name}")
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+def read_dataset_info(path):
+    """Load JSON and convert timestamp strings to datetime objects."""
+    with open(path, 'r') as f:
+        data = json.load(f)
+    for e in data:
+        e['timestamp'] = datetime.strptime(e['timestamp'], "%Y-%m-%d %H:%M:%S")
+    return data
+
+
+def find_future_keys(sample):
+    """Return list of future-prediction keys in a sample entry."""
+    return [k for k in sample.keys() if k.startswith('future_') or k.startswith('avg_')]
+
+
+def is_valid_entry(e, future_keys):
+    """Check if entry has id, price, and all future keys non-null."""
+    if e.get('id') is None or e.get('price') is None:
+        return False
+    for fk in future_keys:
+        if e.get(fk) is None:
+            return False
+    return True
+
+
+def make_sequences(data, seq_len, save_images, future_keys, output_dir):
+    """
+    Generate sliding-window sequences of length seq_len.
+    Only include sequences where every item is valid and last item has future labels.
+
+    Args:
+        data (list): list of entries
+        seq_len (int): window size
+        save_images (bool): if True, create per-sequence folders and copy images
+        future_keys (list): list of future label keys
+        output_dir (str): base output directory for sequences
+    Returns:
+        list of sequence metadata dicts, (skipped_count, total_windows)
+    """
+    sequences = []
+    skipped = 0
+    total_windows = 0
+    total = len(data)
+    for start in range(0, total - seq_len + 1):
+        total_windows += 1
+        block = data[start:start + seq_len]
+        if not all(is_valid_entry(item, future_keys) for item in block):
+            skipped += 1
+            continue
+        last = block[-1]
+        # Build sequence-level metadata
+        seq_id = len(sequences) + 1
+        seq_meta = {
+            'sequence_id': seq_id,
+            'start_time': block[0]['timestamp'].strftime("%Y-%m-%d %H:%M:%S"),
+            'end_time':   last['timestamp'].strftime("%Y-%m-%d %H:%M:%S"),
+            'last_item_id': last['id'],
+            'last_timestamp': last['timestamp'].strftime("%Y-%m-%d %H:%M:%S"),
+            'last_price': last['price']
         }
-        
-        # Add future prediction if available
-        future_index = sequence_end
-        if future_index < len(dataset_info):
-            future_entry = dataset_info[future_index]
-            
-            # Check if future entry has required fields
-            if 'change_percent_step' in future_entry and 'change_percent_hour' in future_entry:
-                sequence_info['future_prediction'] = {
-                    'timestamp': future_entry['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
-                    'price': future_entry['price'],
-                    'change_percent_step': future_entry['change_percent_step'],
-                    'change_percent_hour': future_entry['change_percent_hour']
-                }
-            
-                # Optionally, add additional future data if needed
-                if 'change' in future_entry:
-                    sequence_info['future_prediction']['change'] = future_entry['change']
-                
-                if 'new_filename' in future_entry:
-                    sequence_info['future_prediction']['filename'] = future_entry['new_filename']
-                
-                # Add image paths for the future prediction if available
-                if 'target_filepath' in future_entry:
-                    sequence_info['future_prediction']['original_path'] = future_entry['target_filepath']
-        
-        sequences_info.append(sequence_info)
-    
-    # Write sequences info to JSON file
-    with open(sequences_json_path, 'w') as json_file:
-        json.dump(sequences_info, json_file, indent=4)
+        for fk in future_keys:
+            seq_meta[fk] = last.get(fk)
+        seq_meta['future_filename'] = last.get('new_filename')
+        seq_meta['future_original_path'] = last.get('target_filepath')
 
-# Main script execution
-if __name__ == "__main__":
-    # Read dataset info
-    dataset_info = read_dataset_info(os.path.join("ai_process","test1", "dataset_info.json"))
-    
-    # Handle gaps in timestamps
-    dataset_info = handle_gaps(dataset_info)
-    
-    # Generate sequences and create JSON file with sequences info
-    generate_sequences(dataset_info)
+        # Prepare sequence folders if needed
+        if save_images:
+            seq_folder = os.path.join(output_dir, f"seq_{seq_id:03d}")
+            img_folder = os.path.join(seq_folder, 'images')
+            os.makedirs(img_folder, exist_ok=True)
+        else:
+            seq_folder = None
+            img_folder = None
+
+        # Build items list
+        items = []
+        for idx, item in enumerate(block):
+            img_src = item.get('target_filepath')
+            if save_images and img_src and img_folder:
+                try:
+                    dst = os.path.join(img_folder, os.path.basename(img_src))
+                    copy2(img_src, dst)
+                    img_path = dst
+                except Exception:
+                    img_path = None
+            else:
+                img_path = img_src
+            items.append({
+                'index_in_sequence': idx,
+                'id': item['id'],
+                'timestamp': item['timestamp'].strftime("%Y-%m-%d %H:%M:%S"),
+                'price': item['price'],
+                'image_path': img_path
+            })
+        seq_meta['items'] = items
+        sequences.append(seq_meta)
+
+    return sequences, skipped, total_windows
+
+# =============================================================================
+# Main
+# =============================================================================
+
+def main(args):
+    base = os.path.expanduser(args.base_dir or DEFAULT_BASE_DIR)
+    session = args.session or DEFAULT_SESSION_NAME
+    src = os.path.join(base, DATASET_JSON_REL.format(session=session))
+    out = os.path.join(base, SEQ_FOLDER_REL.format(session=session))
+    seq_json = os.path.join(out, SEQUENCES_JSON_NAME)
+
+    os.makedirs(out, exist_ok=True)
+
+    data = read_dataset_info(src)
+    if not data:
+        print("[ERROR] No data loaded.")
+        return
+    future_keys = find_future_keys(data[0])
+
+    sequences, skipped, total_windows = make_sequences(
+        data=data,
+        seq_len=args.seq_len,
+        save_images=args.save_images,
+        future_keys=future_keys,
+        output_dir=out
+    )
+
+    # Write JSON
+    with open(seq_json, 'w') as jf:
+        json.dump(sequences, jf, indent=4)
+
+    print(f"Total windows: {total_windows}")
+    print(f"Sequences generated: {len(sequences)}")
+    print(f"Sequences skipped: {skipped}")
+    print(f"Metadata saved to {seq_json}")
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description="Generate clean sliding-window sequences from preprocessed heatmap dataset."
+    )
+    parser.add_argument('--base_dir',    type=str,
+                        help=f"Base directory (default: {DEFAULT_BASE_DIR})")
+    parser.add_argument('--session',     type=str,
+                        help=f"Session name (default: {DEFAULT_SESSION_NAME})")
+    parser.add_argument('--seq_len',     type=int,
+                        help=f"Sequence length (default: {DEFAULT_SEQ_LEN})")
+    parser.add_argument('--save_images', action='store_true',
+                        help="Copy images into each sequence folder.")
+    args = parser.parse_args()
+    args.seq_len = args.seq_len or DEFAULT_SEQ_LEN
+    main(args)
