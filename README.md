@@ -82,6 +82,7 @@ Make the setup script executable:
 
 ```bash
 chmod +x setup.sh
+chmod +x service.sh
 ```
 
 Then run it:
