@@ -5,3 +5,16 @@ output_folder: "heatmap_snapshots"
 headless: true              # Run browser headless (true/false)
 include_price_in_filename: true  # Set to true to append BTC price to the filename
 btc_price_url: "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+
+
+
+# NEW: Prediction Service Settings
+prediction:
+  enabled: true                           # Enable/disable prediction service
+  prediction_interval: 300                # Prediction interval in seconds (5 minutes)
+  target_field: "future_future_4h_change_percent"  # Target field to predict
+  session: "auto"                         # "auto" for latest, or specific session name
+  model_path: "auto"                      # "auto" for latest, or specific model path
+  keep_model_in_memory: false             # Load model each time vs keep in memory
+  max_predictions_per_file: 1000          # Split prediction files when they get large
+  prediction_folder: "predictions"        # Folder name under ai_process/
