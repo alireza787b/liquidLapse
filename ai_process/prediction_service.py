@@ -399,39 +399,23 @@ def make_prediction(model, sequence_tensor, device):
         return None, None
 
 def create_prediction_record(model_info, model_config, snapshots, prediction, processing_time, btc_price, target_field, device):
-    """Create comprehensive prediction metadata record"""
+    """Create compact prediction metadata record (consistent schema)"""
     prediction_id = f"pred_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
-    
+    sequence_start = snapshots[-1]['timestamp'] if snapshots else None
+    sequence_end = snapshots[0]['timestamp'] if snapshots else None
+
     return {
         'prediction_id': prediction_id,
         'timestamp': datetime.now(timezone.utc).isoformat(),
-        'model_info': {
-            'session': model_info['session'],
-            'model_path': model_info['path'],
-            'train_dir': model_info['train_dir'],
-            'model_config': model_config,
-            'target_field': target_field
-        },
-        'input_data': {
-            'sequence_length': len(snapshots),
-            'snapshots_used': snapshots,
-            'sequence_start': snapshots[-1]['timestamp'] if snapshots else None,
-            'sequence_end': snapshots[0]['timestamp'] if snapshots else None
-        },
-        'market_context': {
-            'btc_price': btc_price,
-            'btc_price_source': 'coingecko' if btc_price else None
-        },
-        'prediction': {
-            'value': prediction,
-            'confidence': None,  # For future enhancement
-            'processing_time_ms': processing_time
-        },
-        'system_info': {
-            'device': str(device),
-            'python_version': f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-            'torch_version': torch.__version__
-        }
+        'model_session': model_info['session'],
+        'model_path': model_info['path'],
+        'target_field': target_field,
+        'sequence_start': sequence_start,
+        'sequence_end': sequence_end,
+        'btc_price': btc_price,
+        'prediction': prediction,
+        'processing_time_ms': processing_time,
+        'device': str(device)
     }
 
 def save_prediction(prediction_record, directories, session):

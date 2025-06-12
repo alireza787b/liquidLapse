@@ -43,6 +43,23 @@ status() {
     else
         echo "Service is not running."
     fi
+    echo "---- Last 10 log lines ----"
+    tail -n 10 "$LOG" 2>/dev/null || echo "No log file yet."
+}
+
+health() {
+    if [ ! -f "$LOG" ]; then
+        echo "No log file found."
+        exit 1
+    fi
+    last_run=$(stat -c %Y "$LOG")
+    now=$(date +%s)
+    diff=$((now - last_run))
+    if [ $diff -lt $((INTERVAL * 2)) ]; then
+        echo "Service appears healthy (log updated $diff seconds ago)."
+    else
+        echo "WARNING: Log not updated in $diff seconds. Service may be stalled."
+    fi
 }
 
 restart() {
@@ -56,8 +73,9 @@ case "$1" in
     stop) stop ;;
     status) status ;;
     restart) restart ;;
+    health) health ;;
     *)
-        echo "Usage: $0 {start|stop|status|restart}"
+        echo "Usage: $0 {start|stop|status|restart|health}"
         exit 1
         ;;
 esac
