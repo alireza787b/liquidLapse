@@ -177,51 +177,42 @@ def get_latest_snapshots(snapshot_dir, count):
         log_message(f"ERROR: Failed to get latest snapshots: {e}", "ERROR")
         return []
 
-def find_latest_model(base_dir, session="auto"):
-    """Find the latest trained model checkpoint"""
+def find_latest_model(base_dir, config=None):
+    """Find the latest trained model checkpoint in the specified session"""
     try:
         ai_process_dir = os.path.join(base_dir, 'ai_process')
+
+        # Always get session from config, default to 'test1'
+        session = "test1"
+        if config and "prediction" in config and "session" in config["prediction"]:
+            session = config["prediction"]["session"] or "test1"
+
         if not os.path.exists(ai_process_dir):
             log_message("ERROR: ai_process directory not found", "ERROR")
             return None
-        
-        if session == "auto":
-            # Find latest session
-            sessions = [d for d in os.listdir(ai_process_dir) 
-                       if os.path.isdir(os.path.join(ai_process_dir, d)) 
-                       and d != 'predictions']
-            if not sessions:
-                log_message("ERROR: No training sessions found", "ERROR")
-                return None
-                
-            # Use the most recently modified session
-            session_paths = [(s, os.path.join(ai_process_dir, s)) for s in sessions]
-            session = max(session_paths, key=lambda x: os.path.getmtime(x[1]))[0]
-            log_message(f"Auto-selected session: {session}")
-        
-        # Find latest model in session
+
         session_dir = os.path.join(ai_process_dir, session)
         if not os.path.exists(session_dir):
             log_message(f"ERROR: Session directory not found: {session_dir}", "ERROR")
             return None
-        
+
         model_pattern = os.path.join(session_dir, 'train_*', 'best_model.pt')
         model_files = glob(model_pattern)
-        
+
         if not model_files:
             log_message(f"ERROR: No trained models found in session: {session}", "ERROR")
             return None
-        
+
         # Get the most recent model
         latest_model = max(model_files, key=os.path.getmtime)
         log_message(f"Found latest model: {latest_model}")
-        
+
         return {
             'path': latest_model,
             'session': session,
             'train_dir': os.path.dirname(latest_model)
         }
-        
+
     except Exception as e:
         log_message(f"ERROR: Failed to find latest model: {e}", "ERROR")
         return None
