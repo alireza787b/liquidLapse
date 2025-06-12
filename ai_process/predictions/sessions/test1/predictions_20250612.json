@@ -1076,5 +1076,544 @@
       "python_version": "3.10.12",
       "torch_version": "2.7.0+cu126"
     }
+  },
+  {
+    "prediction_id": "pred_20250612_135129_e16f0546",
+    "timestamp": "2025-06-12T13:51:29.831123+00:00",
+    "model_info": {
+      "session": "test1",
+      "model_path": "/root/liquidLapse/ai_process/test1/train_20250607T184302/best_model.pt",
+      "train_dir": "/root/liquidLapse/ai_process/test1/train_20250607T184302",
+      "model_config": {
+        "backbone": "googlenet",
+        "freeze": true,
+        "lstm_hidden": 128,
+        "lstm_layers": 1,
+        "reg_dropout": 0.25,
+        "seq_len": 100
+      },
+      "target_field": "future_future_4h_change_percent"
+    },
+    "input_data": {
+      "sequence_length": 100,
+      "snapshots_used": [
+        {
+          "filename": "heatmap_2025-06-12_13-46-40_BTC-107070.png",
+          "timestamp": "2025-06-12T13:46:40",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_13-46-40_BTC-107070.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_13-41-17_BTC-106936.png",
+          "timestamp": "2025-06-12T13:41:17",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_13-41-17_BTC-106936.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_13-35-51_BTC-106784.png",
+          "timestamp": "2025-06-12T13:35:51",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_13-35-51_BTC-106784.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_13-30-26_BTC-106910.png",
+          "timestamp": "2025-06-12T13:30:26",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_13-30-26_BTC-106910.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_13-25-01_BTC-107019.png",
+          "timestamp": "2025-06-12T13:25:01",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_13-25-01_BTC-107019.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_13-19-36_BTC-107059.png",
+          "timestamp": "2025-06-12T13:19:36",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_13-19-36_BTC-107059.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_13-14-19_BTC-107079.png",
+          "timestamp": "2025-06-12T13:14:19",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_13-14-19_BTC-107079.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_13-08-55_BTC-107090.png",
+          "timestamp": "2025-06-12T13:08:55",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_13-08-55_BTC-107090.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_13-03-37_BTC-107085.png",
+          "timestamp": "2025-06-12T13:03:37",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_13-03-37_BTC-107085.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_12-58-15_BTC-107159.png",
+          "timestamp": "2025-06-12T12:58:15",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_12-58-15_BTC-107159.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_12-52-51_BTC-107290.png",
+          "timestamp": "2025-06-12T12:52:51",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_12-52-51_BTC-107290.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_12-47-30_BTC-107293.png",
+          "timestamp": "2025-06-12T12:47:30",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_12-47-30_BTC-107293.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_12-42-07_BTC-107228.png",
+          "timestamp": "2025-06-12T12:42:07",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_12-42-07_BTC-107228.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_12-36-44_BTC-107071.png",
+          "timestamp": "2025-06-12T12:36:44",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_12-36-44_BTC-107071.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_12-31-20_BTC-106980.png",
+          "timestamp": "2025-06-12T12:31:20",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_12-31-20_BTC-106980.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_12-25-56_BTC-106974.png",
+          "timestamp": "2025-06-12T12:25:56",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_12-25-56_BTC-106974.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_12-20-32_BTC-106960.png",
+          "timestamp": "2025-06-12T12:20:32",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_12-20-32_BTC-106960.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_12-15-08_BTC-106957.png",
+          "timestamp": "2025-06-12T12:15:08",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_12-15-08_BTC-106957.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_12-09-45_BTC-107010.png",
+          "timestamp": "2025-06-12T12:09:45",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_12-09-45_BTC-107010.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_12-04-21_BTC-107010.png",
+          "timestamp": "2025-06-12T12:04:21",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_12-04-21_BTC-107010.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_11-58-57_BTC-107055.png",
+          "timestamp": "2025-06-12T11:58:57",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_11-58-57_BTC-107055.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_11-53-32_BTC-107102.png",
+          "timestamp": "2025-06-12T11:53:32",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_11-53-32_BTC-107102.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_11-48-07_BTC-107081.png",
+          "timestamp": "2025-06-12T11:48:07",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_11-48-07_BTC-107081.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_11-42-45_BTC-107053.png",
+          "timestamp": "2025-06-12T11:42:45",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_11-42-45_BTC-107053.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_11-37-27_BTC-107071.png",
+          "timestamp": "2025-06-12T11:37:27",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_11-37-27_BTC-107071.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_11-32-05_BTC-107143.png",
+          "timestamp": "2025-06-12T11:32:05",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_11-32-05_BTC-107143.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_11-26-48_BTC-107201.png",
+          "timestamp": "2025-06-12T11:26:48",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_11-26-48_BTC-107201.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_11-21-25_BTC-107257.png",
+          "timestamp": "2025-06-12T11:21:25",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_11-21-25_BTC-107257.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_11-16-00_BTC-107297.png",
+          "timestamp": "2025-06-12T11:16:00",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_11-16-00_BTC-107297.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_11-10-37_BTC-107271.png",
+          "timestamp": "2025-06-12T11:10:37",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_11-10-37_BTC-107271.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_11-05-15_BTC-107314.png",
+          "timestamp": "2025-06-12T11:05:15",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_11-05-15_BTC-107314.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_10-59-50_BTC-107287.png",
+          "timestamp": "2025-06-12T10:59:50",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_10-59-50_BTC-107287.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_10-54-27_BTC-107315.png",
+          "timestamp": "2025-06-12T10:54:27",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_10-54-27_BTC-107315.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_10-49-02_BTC-107315.png",
+          "timestamp": "2025-06-12T10:49:02",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_10-49-02_BTC-107315.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_10-43-38_BTC-107293.png",
+          "timestamp": "2025-06-12T10:43:38",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_10-43-38_BTC-107293.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_10-38-13_BTC-107321.png",
+          "timestamp": "2025-06-12T10:38:13",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_10-38-13_BTC-107321.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_10-32-48_BTC-107338.png",
+          "timestamp": "2025-06-12T10:32:48",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_10-32-48_BTC-107338.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_10-27-25_BTC-107375.png",
+          "timestamp": "2025-06-12T10:27:25",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_10-27-25_BTC-107375.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_10-22-01_BTC-107421.png",
+          "timestamp": "2025-06-12T10:22:01",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_10-22-01_BTC-107421.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_10-16-38_BTC-107427.png",
+          "timestamp": "2025-06-12T10:16:38",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_10-16-38_BTC-107427.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_10-09-44_BTC-107452.png",
+          "timestamp": "2025-06-12T10:09:44",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_10-09-44_BTC-107452.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_10-04-20_BTC-107513.png",
+          "timestamp": "2025-06-12T10:04:20",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_10-04-20_BTC-107513.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_09-53-24_BTC-107594.png",
+          "timestamp": "2025-06-12T09:53:24",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_09-53-24_BTC-107594.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_09-48-01_BTC-107632.png",
+          "timestamp": "2025-06-12T09:48:01",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_09-48-01_BTC-107632.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_09-42-38_BTC-107638.png",
+          "timestamp": "2025-06-12T09:42:38",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_09-42-38_BTC-107638.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_09-37-14_BTC-107609.png",
+          "timestamp": "2025-06-12T09:37:14",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_09-37-14_BTC-107609.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_09-31-50_BTC-107579.png",
+          "timestamp": "2025-06-12T09:31:50",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_09-31-50_BTC-107579.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_09-26-28_BTC-107620.png",
+          "timestamp": "2025-06-12T09:26:28",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_09-26-28_BTC-107620.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_09-21-04_BTC-107649.png",
+          "timestamp": "2025-06-12T09:21:04",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_09-21-04_BTC-107649.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_09-15-40_BTC-107667.png",
+          "timestamp": "2025-06-12T09:15:40",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_09-15-40_BTC-107667.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_09-10-18_BTC-107678.png",
+          "timestamp": "2025-06-12T09:10:18",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_09-10-18_BTC-107678.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_09-04-53_BTC-107735.png",
+          "timestamp": "2025-06-12T09:04:53",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_09-04-53_BTC-107735.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_08-59-35_BTC-107748.png",
+          "timestamp": "2025-06-12T08:59:35",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_08-59-35_BTC-107748.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_08-54-11_BTC-107753.png",
+          "timestamp": "2025-06-12T08:54:11",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_08-54-11_BTC-107753.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_08-48-47_BTC-107726.png",
+          "timestamp": "2025-06-12T08:48:47",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_08-48-47_BTC-107726.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_08-43-23_BTC-107792.png",
+          "timestamp": "2025-06-12T08:43:23",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_08-43-23_BTC-107792.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_08-38-00_BTC-107822.png",
+          "timestamp": "2025-06-12T08:38:00",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_08-38-00_BTC-107822.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_08-32-35_BTC-107833.png",
+          "timestamp": "2025-06-12T08:32:35",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_08-32-35_BTC-107833.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_08-27-12_BTC-107764.png",
+          "timestamp": "2025-06-12T08:27:12",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_08-27-12_BTC-107764.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_08-21-49_BTC-107715.png",
+          "timestamp": "2025-06-12T08:21:49",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_08-21-49_BTC-107715.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_08-16-25_BTC-107666.png",
+          "timestamp": "2025-06-12T08:16:25",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_08-16-25_BTC-107666.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_08-11-08_BTC-107499.png",
+          "timestamp": "2025-06-12T08:11:08",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_08-11-08_BTC-107499.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_08-05-43_BTC-107601.png",
+          "timestamp": "2025-06-12T08:05:43",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_08-05-43_BTC-107601.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_08-00-20_BTC-107650.png",
+          "timestamp": "2025-06-12T08:00:20",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_08-00-20_BTC-107650.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_07-54-54_BTC-107610.png",
+          "timestamp": "2025-06-12T07:54:54",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_07-54-54_BTC-107610.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_07-49-32_BTC-107556.png",
+          "timestamp": "2025-06-12T07:49:32",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_07-49-32_BTC-107556.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_07-44-10_BTC-107575.png",
+          "timestamp": "2025-06-12T07:44:10",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_07-44-10_BTC-107575.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_07-38-45_BTC-107689.png",
+          "timestamp": "2025-06-12T07:38:45",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_07-38-45_BTC-107689.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_07-33-04_BTC-107755.png",
+          "timestamp": "2025-06-12T07:33:04",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_07-33-04_BTC-107755.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_07-27-39_BTC-107871.png",
+          "timestamp": "2025-06-12T07:27:39",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_07-27-39_BTC-107871.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_07-22-14_BTC-107877.png",
+          "timestamp": "2025-06-12T07:22:14",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_07-22-14_BTC-107877.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_07-16-49_BTC-107906.png",
+          "timestamp": "2025-06-12T07:16:49",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_07-16-49_BTC-107906.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_07-11-25_BTC-107932.png",
+          "timestamp": "2025-06-12T07:11:25",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_07-11-25_BTC-107932.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_07-06-00_BTC-107951.png",
+          "timestamp": "2025-06-12T07:06:00",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_07-06-00_BTC-107951.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_07-00-37_BTC-107936.png",
+          "timestamp": "2025-06-12T07:00:37",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_07-00-37_BTC-107936.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_06-55-13_BTC-107940.png",
+          "timestamp": "2025-06-12T06:55:13",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_06-55-13_BTC-107940.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_06-49-47_BTC-107947.png",
+          "timestamp": "2025-06-12T06:49:47",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_06-49-47_BTC-107947.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_06-44-22_BTC-107915.png",
+          "timestamp": "2025-06-12T06:44:22",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_06-44-22_BTC-107915.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_06-38-59_BTC-107858.png",
+          "timestamp": "2025-06-12T06:38:59",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_06-38-59_BTC-107858.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_06-33-34_BTC-107825.png",
+          "timestamp": "2025-06-12T06:33:34",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_06-33-34_BTC-107825.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_06-28-09_BTC-107735.png",
+          "timestamp": "2025-06-12T06:28:09",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_06-28-09_BTC-107735.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_06-22-44_BTC-107727.png",
+          "timestamp": "2025-06-12T06:22:44",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_06-22-44_BTC-107727.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_06-17-20_BTC-107747.png",
+          "timestamp": "2025-06-12T06:17:20",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_06-17-20_BTC-107747.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_06-11-54_BTC-107756.png",
+          "timestamp": "2025-06-12T06:11:54",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_06-11-54_BTC-107756.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_06-06-31_BTC-107750.png",
+          "timestamp": "2025-06-12T06:06:31",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_06-06-31_BTC-107750.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_06-01-08_BTC-107743.png",
+          "timestamp": "2025-06-12T06:01:08",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_06-01-08_BTC-107743.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_05-55-44_BTC-107724.png",
+          "timestamp": "2025-06-12T05:55:44",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_05-55-44_BTC-107724.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_05-50-22_BTC-107725.png",
+          "timestamp": "2025-06-12T05:50:22",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_05-50-22_BTC-107725.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_05-44-46_BTC-107796.png",
+          "timestamp": "2025-06-12T05:44:46",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_05-44-46_BTC-107796.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_05-39-22_BTC-107842.png",
+          "timestamp": "2025-06-12T05:39:22",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_05-39-22_BTC-107842.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_05-33-58_BTC-107858.png",
+          "timestamp": "2025-06-12T05:33:58",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_05-33-58_BTC-107858.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_05-28-35_BTC-107850.png",
+          "timestamp": "2025-06-12T05:28:35",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_05-28-35_BTC-107850.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_05-23-11_BTC-107792.png",
+          "timestamp": "2025-06-12T05:23:11",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_05-23-11_BTC-107792.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_05-17-53_BTC-107693.png",
+          "timestamp": "2025-06-12T05:17:53",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_05-17-53_BTC-107693.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_05-12-29_BTC-107653.png",
+          "timestamp": "2025-06-12T05:12:29",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_05-12-29_BTC-107653.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_05-07-06_BTC-107708.png",
+          "timestamp": "2025-06-12T05:07:06",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_05-07-06_BTC-107708.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_05-01-44_BTC-107744.png",
+          "timestamp": "2025-06-12T05:01:44",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_05-01-44_BTC-107744.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_04-56-21_BTC-107713.png",
+          "timestamp": "2025-06-12T04:56:21",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_04-56-21_BTC-107713.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_04-50-57_BTC-107674.png",
+          "timestamp": "2025-06-12T04:50:57",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_04-50-57_BTC-107674.png"
+        },
+        {
+          "filename": "heatmap_2025-06-12_04-45-32_BTC-107616.png",
+          "timestamp": "2025-06-12T04:45:32",
+          "path": "/root/liquidLapse/heatmap_snapshots/heatmap_2025-06-12_04-45-32_BTC-107616.png"
+        }
+      ],
+      "sequence_start": "2025-06-12T04:45:32",
+      "sequence_end": "2025-06-12T13:46:40"
+    },
+    "market_context": {
+      "btc_price": 107055,
+      "btc_price_source": "coingecko"
+    },
+    "prediction": {
+      "value": 0.0022095106542110443,
+      "confidence": null,
+      "processing_time_ms": 24165.088653564453
+    },
+    "system_info": {
+      "device": "cpu",
+      "python_version": "3.10.12",
+      "torch_version": "2.7.0+cu126"
+    }
   }
 ]
