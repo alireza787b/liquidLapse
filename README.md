@@ -12,7 +12,6 @@
 2. **AI-Ready Sequence Generation**
 
    * Converts heatmap snapshots into sequences for AI model training, including:
-
      * Chronologically ordered sequences.
      * Handles timestamp gaps with intelligent interpolation.
      * Tracks price changes and adds future predictions.
@@ -20,7 +19,7 @@
 
 3. **Flexible Configuration**
 
-   * A `config.yaml` file allows easy customization of settings such as target URL, snapshot intervals, BTC price API URL, etc.
+   * A `config.yaml` file allows easy customization of settings such as target URL, snapshot intervals, BTC price API URL, AI prediction settings, and more.
 
 4. **Service Management**
 
@@ -33,12 +32,19 @@
    * Trains models and makes real-time predictions.
    * Pushes and pulls models between local and remote servers.
 
-6. **API for Predictions**
+6. **Prediction Service (Automated or On-Demand)**
+
+   * **predict_once.py**: Runs a single prediction using the latest model and appends the result to a session-based JSON file.
+   * **prediction_service.sh**: Bash script to manage the prediction service (start, stop, status, restart, health).
+   * Designed for robust 24/7 operation on VPS or servers, including auto-restart and log monitoring.
+   * Uses the same config.yaml for session/model selection and prediction intervals.
+
+7. **API for Predictions**
 
    * FastAPI-based server for real-time predictions.
    * Offers flexibility to input the last image and number of frames to predict future market changes.
 
-7. **Cross-Platform Support**
+8. **Cross-Platform Support**
 
    * Works on both Windows and Linux, including headless Linux servers.
 
@@ -55,7 +61,9 @@ liquidLapse/
 ├── README.md                  # Project documentation
 ├── setup.sh                   # Setup script for installing dependencies
 ├── service.sh                 # Service script to manage the liquidLapse process
+├── prediction_service.sh      # Service script to manage the prediction service (AI predictions)
 └── ai_process/                # Directory for AI processing outputs
+    ├── predict_once.py        # Script to run a single prediction and save result
     └── session_name/          # Session folders (named by date/time)
         ├── dataset_info.json  # Metadata for all processed images
         ├── images/            # Processed image files
@@ -83,6 +91,7 @@ Make the setup script executable:
 ```bash
 chmod +x setup.sh
 chmod +x service.sh
+chmod +x prediction_service.sh
 ```
 
 Then run it:
@@ -99,7 +108,7 @@ This script will:
 
 ### 3. Configure the Application
 
-Edit the `config.yaml` file to customize the settings for snapshot capture:
+Edit the `config.yaml` file to customize the settings for snapshot capture and prediction:
 
 ```yaml
 # config.yaml
@@ -109,90 +118,83 @@ output_folder: "heatmap_snapshots"
 headless: true                           # Run Chrome in headless mode
 include_price_in_filename: true          # Append BTC price to the filename
 btc_price_url: "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+
+prediction:
+  enabled: true
+  prediction_interval: 300               # Interval (in seconds) between predictions
+  session: "test1"                       # Model session to use for predictions
+  keep_model_in_memory: false            # Whether to cache the model in memory
+  prediction_folder: "predictions"       # Where to store prediction results
 ```
 
-### 4. Manage the liquidLapse Service
+---
 
-The `service.sh` script can be used to manage the liquidLapse service.
+## Managing the Prediction Service
 
-* **Start the Service:**
+The `prediction_service.sh` script manages the AI prediction service.
+
+* **Start the Prediction Service:**
 
   ```bash
-  ./service.sh start
+  ./prediction_service.sh start
   ```
 
-  This will run `liquidLapse.py` in the background, logging output to `liquidLapseService.log`.
-
-* **Stop the Service:**
+* **Stop the Prediction Service:**
 
   ```bash
-  ./service.sh stop
+  ./prediction_service.sh stop
   ```
 
-* **Restart the Service:**
+* **Restart the Prediction Service:**
 
   ```bash
-  ./service.sh restart
+  ./prediction_service.sh restart
   ```
 
 * **Check Service Status:**
 
   ```bash
-  ./service.sh status
+  ./prediction_service.sh status
   ```
 
-### 5. Running Directly (Without Service Management)
+* **Health Check:**
 
-You can also run the snapshot capture script directly:
+  ```bash
+  ./prediction_service.sh health
+  ```
+
+The service will run `predict_once.py` at intervals defined in your `config.yaml` and append results to session-based JSON files. Logs are saved to `prediction_service.log`.
+
+### Run a Single Prediction Manually
+
+You can also run a single prediction manually:
 
 ```bash
 source venv/bin/activate   # On Windows use: venv\Scripts\activate
-python liquidLapse.py
+python ai_process/predict_once.py
 ```
 
-Press `Ctrl+C` to stop the script.
+---
 
-### 6. Generating AI Training Sequences
+## Example Prediction Output
 
-After capturing snapshots, generate training sequences for AI:
+Each prediction is appended to a compact JSON file for the session:
 
-```bash
-source venv/bin/activate
-python sequence_generator.py
+```json
+{
+  "prediction_id": "pred_20240612_153000_ab12cd34",
+  "timestamp": "2024-06-12T15:30:00.123456Z",
+  "model_session": "test1",
+  "model_path": "ai_process/test1/train_001/best_model.pt",
+  "target_field": "future_future_4h_change_percent",
+  "sequence_start": "2024-06-12T14:30:00Z",
+  "sequence_end": "2024-06-12T15:25:00Z",
+  "btc_price": 67000.12,
+  "prediction": 0.0234,
+  "processing_time_ms": 120.5,
+  "device": "cuda"
+}
 ```
-
-This script will:
-
-1. Process snapshots from the `heatmap_snapshots` directory.
-2. Generate fixed-length sequences with metadata.
-3. Include future prediction data.
-4. Save everything in `ai_process/[session_name]/sequences`.
-
-### 7. Training the AI Model
-
-To train the AI model (CNN + LSTM):
-
-```bash
-source venv/bin/activate
-python train_model.py
-```
-
-This script:
-
-1. Loads the sequences generated in step 6.
-2. Trains the model using the provided configurations.
-3. Saves the best model as `best_model.pt`.
-
-### 8. FastAPI Server for Real-Time Prediction
-
-To run the FastAPI server for real-time predictions:
-
-```bash
-source venv/bin/activate
-uvicorn fastapi_app:app --reload --host 0.0.0.0 --port 8100
-```
-
-The API provides a `/predict` endpoint where you can get predictions based on the latest model and heatmap images. It supports passing specific model names and image files for prediction or defaults to the latest available model and the most recent images.
 
 ---
 
@@ -205,12 +207,19 @@ The API provides a `/predict` endpoint where you can get predictions based on th
   The system is designed to run in headless mode, making it suitable for deployment on remote VPS servers for both heatmap capturing and prediction tasks.
 
 * **Scheduling:**
-  If not using the `service.sh` script, you can also set up cron jobs (Linux) or Windows Task Scheduler for managing snapshot capturing.
+  If not using the `service.sh` or `prediction_service.sh` scripts, you can also set up cron jobs (Linux) or Windows Task Scheduler for managing snapshot capturing and predictions.
 
 * **Logs & Status:**
+  * Runtime logs for prediction service are saved to `prediction_service.log`.
+  * Status information is available via the `status` and `health` commands in the service script.
 
-  * Runtime logs are saved to `liquidLapseService.log`.
-  * Status information is saved in `liquidLapseService.status`.
+---
+
+## Best Practices
+
+- For 24/7 operation and auto-restart after server reboots, use the `prediction_service.sh` script with a process manager (e.g., systemd on Linux).
+- Monitor logs (`prediction_service.log`) and use the `status` and `health` commands for troubleshooting.
+- Always specify the desired model session in `config.yaml` for reproducible predictions.
 
 ---
 
