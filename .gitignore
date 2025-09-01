@@ -184,3 +184,27 @@ heatmap_snapshots/
 *.status
 
 ai_process/test1/
+
+*.json
+
+# Runtime files (should never be committed)
+*.pid
+*.log
+*.status
+
+# AI Processing outputs (generated data)
+ai_process/predictions/
+ai_process/*/sessions/
+ai_process/*/train_*/
+ai_process/*/sequences/
+ai_process/*/images/
+
+# Temporary files
+debug_*.html
+*.backup
+.DS_Store
+Thumbs.db
+
+# Service files
+liquidLapseService.*
+prediction_service.*
