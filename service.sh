@@ -91,6 +91,7 @@ cleanup_resources() {
         echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
     fi
 }
+# REPLACE the start_service function in service.sh with this robust version
 
 start_service() {
     echo -e "${BLUE}[INFO]${NC} Starting liquidLapse service..."
@@ -119,11 +120,12 @@ start_service() {
     
     cd "$BASE_DIR"
     
-    # INLINE SERVICE FUNCTION (no external function calls)
+    # ROBUST SERVICE LOOP - NO EXIT ON MINOR ERRORS
     nohup bash -c '
-        set -euo pipefail
+        # REMOVE strict error handling for service loop
+        set +e  # Allow errors to continue
         
-        # Set proper environment
+        # Set environment
         export PATH="'"$VENV_DIR"'/bin:$PATH"
         export PYTHONPATH="'"$BASE_DIR"':${PYTHONPATH:-}"
         cd "'"$BASE_DIR"'"
@@ -135,121 +137,167 @@ start_service() {
         max_consecutive_failures=3
         service_start_time=$(date +%s)
         
-        echo "[$(date -Iseconds)] Production service starting with PID $$" >> "'"$HEALTH_LOG"'"
+        echo "[$(date -Iseconds)] ROBUST service starting with PID $$" >> "'"$HEALTH_LOG"'"
         echo "[$(date -Iseconds)] Working directory: $(pwd)" >> "'"$HEALTH_LOG"'"
-        echo "[$(date -Iseconds)] Python path: $(which python)" >> "'"$HEALTH_LOG"'"
+        echo "[$(date -Iseconds)] Python executable: $(which python || echo '"'"'"$VENV_DIR/bin/python"'"'"')" >> "'"$HEALTH_LOG"'"
         
+        # INFINITE LOOP WITH ERROR RESILIENCE
         while true; do
-            cycle_start_time=$(date +%s)
-            current_time=$(date "+%Y-%m-%d %H:%M:%S")
-            
-            # Get interval from config
-            period=$(python -c "
+            # Wrap each cycle in error protection
+            (
+                cycle_start_time=$(date +%s)
+                current_time=$(date "+%Y-%m-%d %H:%M:%S" 2>/dev/null || date)
+                
+                echo "[$(date -Iseconds)] === Starting cycle (success: $success_count, failures: $failure_count) ===" >> "'"$HEALTH_LOG"'"
+                
+                # Get interval from config (with fallback)
+                period=$(python -c "
 import yaml
 import sys
 try:
     with open(\"config.yaml\", \"r\") as f:
         config = yaml.safe_load(f)
-    print(config.get(\"check_interval\", 300))
+    print(int(config.get(\"check_interval\", 300)))
 except Exception as e:
-    print(f\"Config error: {e}\", file=sys.stderr)
+    print(\"Config error:\", str(e), file=sys.stderr)
     print(300)
 " 2>>"'$HEALTH_LOG'" || echo "300")
-            
-            uptime_seconds=$((cycle_start_time - service_start_time))
-            
-            # Update status
-            {
-                echo "CAPTURE_ATTEMPT: $current_time"
-                echo "INTERVAL_SECONDS: $period"
-                echo "SUCCESS_COUNT: $success_count"
-                echo "FAILURE_COUNT: $failure_count"
-                echo "CONSECUTIVE_FAILURES: $consecutive_failures"
-                echo "UPTIME_SECONDS: $uptime_seconds"
-            } > "'"$STATUSFILE"'"
-            
-            # Circuit breaker
-            if [ $consecutive_failures -ge $max_consecutive_failures ]; then
-                echo "[$(date -Iseconds)] Circuit breaker active - waiting 300s" >> "'"$HEALTH_LOG"'"
-                echo "CIRCUIT_BREAKER_ACTIVE: Extended delay due to failures" >> "'"$STATUSFILE"'"
-                sleep 300
-                consecutive_failures=0
-                continue
-            fi
-            
-            # Network check
-            if ! curl -s --connect-timeout 10 https://www.google.com > /dev/null 2>&1; then
-                echo "[$(date -Iseconds)] Network connectivity failed" >> "'"$HEALTH_LOG"'"
-                echo "NETWORK_ERROR: No connectivity at $current_time" >> "'"$STATUSFILE"'"
-                sleep 120
-                continue
-            fi
-            
-            # Execute capture
-            echo "[$(date -Iseconds)] Starting capture attempt" >> "'"$HEALTH_LOG"'"
-            echo "[$(date -Iseconds)] Executing: python liquidLapse.py" >> "'"$HEALTH_LOG"'"
-            
-            execution_start=$(date +%s)
-            timeout 240 python liquidLapse.py >> "'"$LOGFILE"'" 2>&1
-            exit_code=$?
-            execution_duration=$(($(date +%s) - execution_start))
-            
-            echo "[$(date -Iseconds)] Capture completed with exit code: $exit_code (duration: ${execution_duration}s)" >> "'"$HEALTH_LOG"'"
-            
-            if [ $exit_code -eq 0 ]; then
-                # Success
-                success_time=$(date "+%Y-%m-%d %H:%M:%S")
-                ((success_count++))
-                consecutive_failures=0
                 
-                echo "[$(date -Iseconds)] Capture successful (${execution_duration}s)" >> "'"$HEALTH_LOG"'"
-                echo "CAPTURE_SUCCESS: $success_time (duration: ${execution_duration}s)" >> "'"$STATUSFILE"'"
-                
-            else
-                # Failure
-                failure_time=$(date "+%Y-%m-%d %H:%M:%S")
-                ((failure_count++))
-                ((consecutive_failures++))
-                
-                # Log last few lines of output for debugging
-                echo "[$(date -Iseconds)] Last 5 lines of output:" >> "'"$HEALTH_LOG"'"
-                tail -5 "'"$LOGFILE"'" >> "'"$HEALTH_LOG"'"
-                
-                if [ $exit_code -eq 124 ]; then
-                    echo "[$(date -Iseconds)] Capture TIMEOUT after 240s" >> "'"$HEALTH_LOG"'"
-                    echo "CAPTURE_TIMEOUT: $failure_time" >> "'"$STATUSFILE"'"
-                elif [ $exit_code -eq 1 ]; then
-                    echo "[$(date -Iseconds)] Capture FAILED - Python script error (exit: $exit_code)" >> "'"$HEALTH_LOG"'"
-                    echo "CAPTURE_FAILURE: $failure_time (exit: $exit_code - Python error)" >> "'"$STATUSFILE"'"
-                else
-                    echo "[$(date -Iseconds)] Capture FAILED with exit code $exit_code" >> "'"$HEALTH_LOG"'"
-                    echo "CAPTURE_FAILURE: $failure_time (exit: $exit_code)" >> "'"$STATUSFILE"'"
+                # Validate period
+                if ! [[ "$period" =~ ^[0-9]+$ ]] || [ "$period" -lt 60 ]; then
+                    period=300
+                    echo "[$(date -Iseconds)] Invalid period, using default: $period" >> "'"$HEALTH_LOG"'"
                 fi
-            fi
+                
+                uptime_seconds=$((cycle_start_time - service_start_time))
+                
+                # Update status (with error protection)
+                {
+                    echo "CAPTURE_ATTEMPT: $current_time"
+                    echo "INTERVAL_SECONDS: $period"
+                    echo "SUCCESS_COUNT: $success_count"
+                    echo "FAILURE_COUNT: $failure_count"
+                    echo "CONSECUTIVE_FAILURES: $consecutive_failures"
+                    echo "UPTIME_SECONDS: $uptime_seconds"
+                } > "'"$STATUSFILE"'" 2>/dev/null || true
+                
+                # Circuit breaker
+                if [ "$consecutive_failures" -ge "$max_consecutive_failures" ]; then
+                    echo "[$(date -Iseconds)] Circuit breaker active - waiting 300s" >> "'"$HEALTH_LOG"'"
+                    echo "CIRCUIT_BREAKER_ACTIVE: Extended delay" > "'"$STATUSFILE"'" 2>/dev/null || true
+                    sleep 300 || sleep 60  # Fallback shorter sleep
+                    consecutive_failures=0
+                    return 0  # Continue main loop
+                fi
+                
+                # Network check (with timeout and fallback)
+                network_ok=false
+                if timeout 15 curl -s --connect-timeout 10 https://www.google.com > /dev/null 2>&1; then
+                    network_ok=true
+                elif timeout 15 curl -s --connect-timeout 10 https://1.1.1.1 > /dev/null 2>&1; then
+                    network_ok=true
+                fi
+                
+                if [ "$network_ok" = false ]; then
+                    echo "[$(date -Iseconds)] Network connectivity failed" >> "'"$HEALTH_LOG"'"
+                    echo "NETWORK_ERROR: No connectivity at $current_time" > "'"$STATUSFILE"'" 2>/dev/null || true
+                    sleep 120 || sleep 60
+                    return 0  # Continue main loop
+                fi
+                
+                # Execute capture with multiple fallbacks
+                echo "[$(date -Iseconds)] Starting capture attempt" >> "'"$HEALTH_LOG"'"
+                
+                execution_start=$(date +%s)
+                exit_code=1
+                
+                # Try with timeout
+                if timeout 240 python liquidLapse.py >> "'"$LOGFILE"'" 2>&1; then
+                    exit_code=0
+                elif timeout 240 "'"$VENV_DIR"'/bin/python" liquidLapse.py >> "'"$LOGFILE"'" 2>&1; then
+                    exit_code=0
+                else
+                    exit_code=1
+                fi
+                
+                execution_duration=$(($(date +%s) - execution_start))
+                echo "[$(date -Iseconds)] Capture completed with exit code: $exit_code (duration: ${execution_duration}s)" >> "'"$HEALTH_LOG"'"
+                
+                # Process results
+                if [ $exit_code -eq 0 ]; then
+                    # Success
+                    success_time=$(date "+%Y-%m-%d %H:%M:%S" 2>/dev/null || date)
+                    success_count=$((success_count + 1))
+                    consecutive_failures=0
+                    
+                    echo "[$(date -Iseconds)] SUCCESS #$success_count (${execution_duration}s)" >> "'"$HEALTH_LOG"'"
+                    echo "CAPTURE_SUCCESS: $success_time (duration: ${execution_duration}s)" > "'"$STATUSFILE"'" 2>/dev/null || true
+                    
+                else
+                    # Failure
+                    failure_time=$(date "+%Y-%m-%d %H:%M:%S" 2>/dev/null || date)
+                    failure_count=$((failure_count + 1))
+                    consecutive_failures=$((consecutive_failures + 1))
+                    
+                    echo "[$(date -Iseconds)] FAILURE #$failure_count (consecutive: $consecutive_failures)" >> "'"$HEALTH_LOG"'"
+                    echo "CAPTURE_FAILURE: $failure_time (exit: $exit_code)" > "'"$STATUSFILE"'" 2>/dev/null || true
+                    
+                    # Show recent errors for debugging
+                    echo "[$(date -Iseconds)] Recent log output:" >> "'"$HEALTH_LOG"'"
+                    tail -3 "'"$LOGFILE"'" 2>/dev/null >> "'"$HEALTH_LOG"'" || true
+                fi
+                
+                # GUARANTEED INTERVAL TIMING
+                cycle_duration=$(($(date +%s) - cycle_start_time))
+                sleep_duration=$((period - cycle_duration))
+                
+                if [ $sleep_duration -gt 0 ]; then
+                    echo "[$(date -Iseconds)] Cycle completed in ${cycle_duration}s, sleeping ${sleep_duration}s until next cycle" >> "'"$HEALTH_LOG"'"
+                    
+                    # Sleep in chunks to allow interruption
+                    while [ $sleep_duration -gt 0 ]; do
+                        chunk_sleep=$((sleep_duration > 60 ? 60 : sleep_duration))
+                        sleep $chunk_sleep || sleep 30  # Fallback sleep
+                        sleep_duration=$((sleep_duration - chunk_sleep))
+                    done
+                else
+                    echo "[$(date -Iseconds)] Cycle overrun: ${cycle_duration}s > ${period}s - starting next cycle immediately" >> "'"$HEALTH_LOG"'"
+                fi
+                
+                echo "[$(date -Iseconds)] === Cycle completed, starting next ===" >> "'"$HEALTH_LOG"'"
+                
+            ) || {
+                # Cycle error handler
+                echo "[$(date -Iseconds)] ERROR: Cycle failed, continuing service..." >> "'"$HEALTH_LOG"'"
+                sleep 60 || true  # Brief pause before next cycle
+            }
             
-            # Maintain interval timing
-            cycle_duration=$(($(date +%s) - cycle_start_time))
-            sleep_duration=$((period - cycle_duration))
-            
-            if [ $sleep_duration -gt 0 ]; then
-                echo "[$(date -Iseconds)] Sleeping ${sleep_duration}s" >> "'"$HEALTH_LOG"'"
-                sleep $sleep_duration
-            else
-                echo "[$(date -Iseconds)] Cycle overrun: ${cycle_duration}s > ${period}s" >> "'"$HEALTH_LOG"'"
-            fi
-        done
+        done  # End of while true loop
+        
     ' >> "$LOGFILE" 2>&1 &
     
     local service_pid=$!
     echo "$service_pid" > "$PIDFILE"
     
-    # Verify service started
-    sleep 3
+    # Verify service started and is stable
+    sleep 5
     if kill -0 "$service_pid" 2>/dev/null; then
-        echo -e "${GREEN}[SUCCESS]${NC} Service started (PID: $service_pid)"
+        echo -e "${GREEN}[SUCCESS]${NC} Service started and running (PID: $service_pid)"
+        
+        # Additional verification - check for 10 more seconds
+        sleep 10
+        if kill -0 "$service_pid" 2>/dev/null; then
+            echo -e "${GREEN}[SUCCESS]${NC} Service confirmed stable after 15 seconds"
+        else
+            echo -e "${RED}[ERROR]${NC} Service died within 15 seconds of startup"
+            rm -f "$PIDFILE"
+            echo "[$(date -Iseconds)] Service died during startup verification" >> "$HEALTH_LOG"
+            exit 1
+        fi
     else
         echo -e "${RED}[ERROR]${NC} Service failed to start"
         rm -f "$PIDFILE"
+        echo "[$(date -Iseconds)] Service failed to start" >> "$HEALTH_LOG"
         exit 1
     fi
 }
