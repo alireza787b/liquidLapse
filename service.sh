@@ -49,6 +49,10 @@ validate_environment() {
     
     if ! "$PYTHON" -c "import selenium, yaml, requests" 2>/dev/null; then
         echo -e "${RED}[ERROR]${NC} Required Python dependencies not available"
+        echo -e "${RED}[ERROR]${NC} Testing individual imports:"
+        "$PYTHON" -c "import selenium" 2>&1 | head -1 || echo "  - selenium: FAILED"
+        "$PYTHON" -c "import yaml" 2>&1 | head -1 || echo "  - yaml: FAILED"  
+        "$PYTHON" -c "import requests" 2>&1 | head -1 || echo "  - requests: FAILED"
         ((errors++))
     fi
     
@@ -118,7 +122,11 @@ start_service() {
     # INLINE SERVICE FUNCTION (no external function calls)
     nohup bash -c '
         set -euo pipefail
-        source "'"$VENV_DIR"'/bin/activate"
+        
+        # Set proper environment
+        export PATH="'"$VENV_DIR"'/bin:$PATH"
+        export PYTHONPATH="'"$BASE_DIR"':${PYTHONPATH:-}"
+        cd "'"$BASE_DIR"'"
         
         # Service variables
         success_count=0
@@ -128,21 +136,25 @@ start_service() {
         service_start_time=$(date +%s)
         
         echo "[$(date -Iseconds)] Production service starting with PID $$" >> "'"$HEALTH_LOG"'"
+        echo "[$(date -Iseconds)] Working directory: $(pwd)" >> "'"$HEALTH_LOG"'"
+        echo "[$(date -Iseconds)] Python path: $(which python)" >> "'"$HEALTH_LOG"'"
         
         while true; do
             cycle_start_time=$(date +%s)
             current_time=$(date "+%Y-%m-%d %H:%M:%S")
             
             # Get interval from config
-            period=$('"$PYTHON"' -c "
+            period=$(python -c "
 import yaml
+import sys
 try:
     with open(\"config.yaml\", \"r\") as f:
         config = yaml.safe_load(f)
     print(config.get(\"check_interval\", 300))
-except:
+except Exception as e:
+    print(f\"Config error: {e}\", file=sys.stderr)
     print(300)
-" 2>/dev/null || echo "300")
+" 2>>"'$HEALTH_LOG'" || echo "300")
             
             uptime_seconds=$((cycle_start_time - service_start_time))
             
@@ -175,11 +187,14 @@ except:
             
             # Execute capture
             echo "[$(date -Iseconds)] Starting capture attempt" >> "'"$HEALTH_LOG"'"
+            echo "[$(date -Iseconds)] Executing: python liquidLapse.py" >> "'"$HEALTH_LOG"'"
             
             execution_start=$(date +%s)
-            timeout 240 '"$PYTHON"' "'"$SCRIPT"'" >> "'"$LOGFILE"'" 2>&1
+            timeout 240 python liquidLapse.py >> "'"$LOGFILE"'" 2>&1
             exit_code=$?
             execution_duration=$(($(date +%s) - execution_start))
+            
+            echo "[$(date -Iseconds)] Capture completed with exit code: $exit_code (duration: ${execution_duration}s)" >> "'"$HEALTH_LOG"'"
             
             if [ $exit_code -eq 0 ]; then
                 # Success
@@ -196,9 +211,16 @@ except:
                 ((failure_count++))
                 ((consecutive_failures++))
                 
+                # Log last few lines of output for debugging
+                echo "[$(date -Iseconds)] Last 5 lines of output:" >> "'"$HEALTH_LOG"'"
+                tail -5 "'"$LOGFILE"'" >> "'"$HEALTH_LOG"'"
+                
                 if [ $exit_code -eq 124 ]; then
                     echo "[$(date -Iseconds)] Capture TIMEOUT after 240s" >> "'"$HEALTH_LOG"'"
                     echo "CAPTURE_TIMEOUT: $failure_time" >> "'"$STATUSFILE"'"
+                elif [ $exit_code -eq 1 ]; then
+                    echo "[$(date -Iseconds)] Capture FAILED - Python script error (exit: $exit_code)" >> "'"$HEALTH_LOG"'"
+                    echo "CAPTURE_FAILURE: $failure_time (exit: $exit_code - Python error)" >> "'"$STATUSFILE"'"
                 else
                     echo "[$(date -Iseconds)] Capture FAILED with exit code $exit_code" >> "'"$HEALTH_LOG"'"
                     echo "CAPTURE_FAILURE: $failure_time (exit: $exit_code)" >> "'"$STATUSFILE"'"
