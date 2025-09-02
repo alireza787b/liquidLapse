@@ -1,204 +1,391 @@
 #!/bin/bash
-# service.sh - Manage the liquidLapse service with detailed status reporting.
-#
-# This script will:
-#   - Activate the Python virtual environment.
-#   - Read the snapshot interval (check_interval) from config.yaml.
-#   - Run liquidLapse.py (which should take a single snapshot and exit).
-#   - Log execution details and update a status file with:
-#         Last snapshot execution time,
-#         Interval period,
-#         and any errors.
-#   - Repeat the process in an infinite loop until the service is stopped.
-#
-# A PID file (liquidLapseService.pid) is used to manage the background process.
-#
-# Usage: ./service.sh {start|stop|restart|status}
+# Fixed service.sh - Production-Ready Service Manager
+# CORRECTED: Function scoping issues resolved
 
-set -e
+set -euo pipefail
 
-# Get the absolute path of the current directory
+# Configuration
 BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-# Define paths for the virtual environment, main script, PID file, status file, and log file
 VENV_DIR="$BASE_DIR/venv"
 PYTHON="$VENV_DIR/bin/python"
 SCRIPT="$BASE_DIR/liquidLapse.py"
+
+# Files
 PIDFILE="$BASE_DIR/liquidLapseService.pid"
 STATUSFILE="$BASE_DIR/liquidLapseService.status"
 LOGFILE="$BASE_DIR/liquidLapseService.log"
+HEALTH_LOG="$BASE_DIR/service_health.log"
 
-# Colored output for console messages only
+# Colors
+RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
-RED='\033[0;31m'
-NC='\033[0m' # No Color
+YELLOW='\033[1;33m'
+NC='\033[0m'
 
-# Functions for printing console messages
-info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
-}
-success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
-}
-error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+# Simple logging functions (inline for subshell compatibility)
+log_to_health() {
+    echo "[$(date -Iseconds)] $1" >> "$HEALTH_LOG"
 }
 
-# Function to read check_interval from config.yaml using the virtualenv's Python
-get_interval() {
-    $PYTHON -c "import yaml; print(yaml.safe_load(open('config.yaml'))['check_interval'])"
+validate_environment() {
+    local errors=0
+    echo -e "${BLUE}[INFO]${NC} Validating environment..."
+    
+    if [ ! -d "$VENV_DIR" ] || [ ! -x "$VENV_DIR/bin/python" ]; then
+        echo -e "${RED}[ERROR]${NC} Virtual environment invalid: $VENV_DIR"
+        ((errors++))
+    fi
+    
+    if [ ! -f "$SCRIPT" ] || [ ! -r "$SCRIPT" ]; then
+        echo -e "${RED}[ERROR]${NC} Main script not found: $SCRIPT"
+        ((errors++))
+    fi
+    
+    if [ ! -f "$BASE_DIR/config.yaml" ]; then
+        echo -e "${RED}[ERROR]${NC} Config file not found: $BASE_DIR/config.yaml"
+        ((errors++))
+    fi
+    
+    if ! "$PYTHON" -c "import selenium, yaml, requests" 2>/dev/null; then
+        echo -e "${RED}[ERROR]${NC} Required Python dependencies not available"
+        ((errors++))
+    fi
+    
+    if [ $errors -eq 0 ]; then
+        echo -e "${GREEN}[SUCCESS]${NC} Environment validation passed"
+        return 0
+    else
+        echo -e "${RED}[ERROR]${NC} Environment validation failed with $errors errors"
+        return 1
+    fi
 }
 
-# Function that runs the periodic snapshot loop and updates the status file.
-run_service() {
-    while true; do
-        # Get interval from config.yaml
-        PERIOD=$("$PYTHON" -c "import yaml; print(yaml.safe_load(open('config.yaml'))['check_interval'])")
-        CURRENT_TIME=$(date "+%Y-%m-%d %H:%M:%S")
-        
-        # Update status file with a clear marker (plain text)
-        {
-            echo "SNAPSHOT_START: $CURRENT_TIME"
-            echo "INTERVAL: ${PERIOD} seconds"
-        } > "$STATUSFILE"
-        
-        echo "[INFO] [$CURRENT_TIME] Running snapshot (interval: ${PERIOD} seconds)..."
-        "$PYTHON" "$SCRIPT" >> "$LOGFILE" 2>&1
-        EXIT_CODE=$?
-        if [ $EXIT_CODE -ne 0 ]; then
-            ERR_TIME=$(date "+%Y-%m-%d %H:%M:%S")
-            echo "[ERROR] Snapshot failed with exit code $EXIT_CODE at $ERR_TIME." >> "$LOGFILE"
-            echo "SNAPSHOT_ERROR: Exit code $EXIT_CODE at $ERR_TIME" >> "$STATUSFILE"
-        else
-            SUCCESS_TIME=$(date "+%Y-%m-%d %H:%M:%S")
-            echo "[SUCCESS] Snapshot executed successfully at $SUCCESS_TIME." >> "$LOGFILE"
-            echo "SNAPSHOT_SUCCESS: $SUCCESS_TIME" >> "$STATUSFILE"
-        fi
-
-        echo "[INFO] Sleeping for ${PERIOD} seconds until next execution..."
-        sleep "${PERIOD}"
-    done
+cleanup_resources() {
+    echo -e "${BLUE}[INFO]${NC} Cleaning up system resources..."
+    
+    # Kill Chrome processes
+    local chrome_pids=$(pgrep -f "chrome" 2>/dev/null || true)
+    if [ -n "$chrome_pids" ]; then
+        echo "$chrome_pids" | while read -r pid; do
+            if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+                kill -TERM "$pid" 2>/dev/null || true
+                sleep 1
+                kill -KILL "$pid" 2>/dev/null || true
+            fi
+        done
+    fi
+    
+    # Clean temp directories
+    find /tmp -maxdepth 1 -name ".org.chromium.Chromium.*" -type d -mmin +60 -exec rm -rf {} + 2>/dev/null || true
+    find /tmp -maxdepth 1 -name "scoped_dir*" -type d -mmin +60 -exec rm -rf {} + 2>/dev/null || true
+    
+    # Memory cleanup if low
+    local available_mem=$(free -m | awk 'NR==2{print $7}')
+    if [ "$available_mem" -lt 300 ]; then
+        sync
+        echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+    fi
 }
 
-# Function to start the service as a background process
 start_service() {
+    echo -e "${BLUE}[INFO]${NC} Starting liquidLapse service..."
+    
+    if ! validate_environment; then
+        echo -e "${RED}[ERROR]${NC} Environment validation failed"
+        exit 1
+    fi
+    
     if [ -f "$PIDFILE" ]; then
-        PID=$(cat "$PIDFILE")
-        if ps -p "$PID" > /dev/null; then
-            success "Service is already running (PID: $PID)."
+        local existing_pid=$(cat "$PIDFILE" 2>/dev/null || echo "")
+        if [ -n "$existing_pid" ] && kill -0 "$existing_pid" 2>/dev/null; then
+            echo -e "${GREEN}[SUCCESS]${NC} Service already running (PID: $existing_pid)"
             exit 0
         else
-            info "Found stale PID file. Removing it."
+            echo -e "${BLUE}[INFO]${NC} Removing stale PID file"
             rm -f "$PIDFILE"
         fi
     fi
-
-    info "Activating virtual environment and starting service..."
+    
+    cleanup_resources
+    
+    # Initialize logs
+    echo "=== Service Starting at $(date -Iseconds) ===" >> "$LOGFILE"
+    echo "[$(date -Iseconds)] Service initialization" >> "$HEALTH_LOG"
+    
     cd "$BASE_DIR"
-    if [ ! -d "$VENV_DIR" ]; then
-        error "Virtual environment not found. Please run setup.sh first."
-        exit 1
-    fi
-
-    # Start the service in the background. Inline the periodic loop without ANSI codes for logging.
+    
+    # INLINE SERVICE FUNCTION (no external function calls)
     nohup bash -c '
+        set -euo pipefail
         source "'"$VENV_DIR"'/bin/activate"
-        run_service() {
-            while true; do
-                PERIOD=$('"$PYTHON"' -c "import yaml; print(yaml.safe_load(open(\"config.yaml\"))[\"check_interval\"])")
-                CURRENT_TIME=$(date "+%Y-%m-%d %H:%M:%S")
-                {
-                    echo "SNAPSHOT_START: $CURRENT_TIME"
-                    echo "INTERVAL: ${PERIOD} seconds"
-                } >> "'"$STATUSFILE"'"
-                echo "[INFO] [$CURRENT_TIME] Running snapshot (interval: ${PERIOD} seconds)..."
-                '"$PYTHON"' "'"$SCRIPT"'" >> "'"$LOGFILE"'" 2>&1
-                EXIT_CODE=$?
-                if [ $EXIT_CODE -ne 0 ]; then
-                    ERR_TIME=$(date "+%Y-%m-%d %H:%M:%S")
-                    echo "[ERROR] Snapshot failed with exit code $EXIT_CODE at $ERR_TIME." >> "'"$LOGFILE"'"
-                    echo "SNAPSHOT_ERROR: Exit code $EXIT_CODE at $ERR_TIME" >> "'"$STATUSFILE"'"
+        
+        # Service variables
+        success_count=0
+        failure_count=0
+        consecutive_failures=0
+        max_consecutive_failures=3
+        service_start_time=$(date +%s)
+        
+        echo "[$(date -Iseconds)] Production service starting with PID $$" >> "'"$HEALTH_LOG"'"
+        
+        while true; do
+            cycle_start_time=$(date +%s)
+            current_time=$(date "+%Y-%m-%d %H:%M:%S")
+            
+            # Get interval from config
+            period=$('"$PYTHON"' -c "
+import yaml
+try:
+    with open(\"config.yaml\", \"r\") as f:
+        config = yaml.safe_load(f)
+    print(config.get(\"check_interval\", 300))
+except:
+    print(300)
+" 2>/dev/null || echo "300")
+            
+            uptime_seconds=$((cycle_start_time - service_start_time))
+            
+            # Update status
+            {
+                echo "CAPTURE_ATTEMPT: $current_time"
+                echo "INTERVAL_SECONDS: $period"
+                echo "SUCCESS_COUNT: $success_count"
+                echo "FAILURE_COUNT: $failure_count"
+                echo "CONSECUTIVE_FAILURES: $consecutive_failures"
+                echo "UPTIME_SECONDS: $uptime_seconds"
+            } > "'"$STATUSFILE"'"
+            
+            # Circuit breaker
+            if [ $consecutive_failures -ge $max_consecutive_failures ]; then
+                echo "[$(date -Iseconds)] Circuit breaker active - waiting 300s" >> "'"$HEALTH_LOG"'"
+                echo "CIRCUIT_BREAKER_ACTIVE: Extended delay due to failures" >> "'"$STATUSFILE"'"
+                sleep 300
+                consecutive_failures=0
+                continue
+            fi
+            
+            # Network check
+            if ! curl -s --connect-timeout 10 https://www.google.com > /dev/null 2>&1; then
+                echo "[$(date -Iseconds)] Network connectivity failed" >> "'"$HEALTH_LOG"'"
+                echo "NETWORK_ERROR: No connectivity at $current_time" >> "'"$STATUSFILE"'"
+                sleep 120
+                continue
+            fi
+            
+            # Execute capture
+            echo "[$(date -Iseconds)] Starting capture attempt" >> "'"$HEALTH_LOG"'"
+            
+            execution_start=$(date +%s)
+            timeout 240 '"$PYTHON"' "'"$SCRIPT"'" >> "'"$LOGFILE"'" 2>&1
+            exit_code=$?
+            execution_duration=$(($(date +%s) - execution_start))
+            
+            if [ $exit_code -eq 0 ]; then
+                # Success
+                success_time=$(date "+%Y-%m-%d %H:%M:%S")
+                ((success_count++))
+                consecutive_failures=0
+                
+                echo "[$(date -Iseconds)] Capture successful (${execution_duration}s)" >> "'"$HEALTH_LOG"'"
+                echo "CAPTURE_SUCCESS: $success_time (duration: ${execution_duration}s)" >> "'"$STATUSFILE"'"
+                
+            else
+                # Failure
+                failure_time=$(date "+%Y-%m-%d %H:%M:%S")
+                ((failure_count++))
+                ((consecutive_failures++))
+                
+                if [ $exit_code -eq 124 ]; then
+                    echo "[$(date -Iseconds)] Capture TIMEOUT after 240s" >> "'"$HEALTH_LOG"'"
+                    echo "CAPTURE_TIMEOUT: $failure_time" >> "'"$STATUSFILE"'"
                 else
-                    SUCCESS_TIME=$(date "+%Y-%m-%d %H:%M:%S")
-                    echo "[SUCCESS] Snapshot executed successfully at $SUCCESS_TIME." >> "'"$LOGFILE"'"
-                    echo "SNAPSHOT_SUCCESS: $SUCCESS_TIME" >> "'"$STATUSFILE"'"
+                    echo "[$(date -Iseconds)] Capture FAILED with exit code $exit_code" >> "'"$HEALTH_LOG"'"
+                    echo "CAPTURE_FAILURE: $failure_time (exit: $exit_code)" >> "'"$STATUSFILE"'"
                 fi
-                sleep ${PERIOD}
-            done
-        }
-        run_service
-    ' > "$LOGFILE" 2>&1 &
-
-    echo $! > "$PIDFILE"
-    success "Service started with PID: $(cat "$PIDFILE")."
-}
-
-# Function to stop the service
-stop_service() {
-    if [ ! -f "$PIDFILE" ]; then
-        error "Service is not running (PID file not found)."
+            fi
+            
+            # Maintain interval timing
+            cycle_duration=$(($(date +%s) - cycle_start_time))
+            sleep_duration=$((period - cycle_duration))
+            
+            if [ $sleep_duration -gt 0 ]; then
+                echo "[$(date -Iseconds)] Sleeping ${sleep_duration}s" >> "'"$HEALTH_LOG"'"
+                sleep $sleep_duration
+            else
+                echo "[$(date -Iseconds)] Cycle overrun: ${cycle_duration}s > ${period}s" >> "'"$HEALTH_LOG"'"
+            fi
+        done
+    ' >> "$LOGFILE" 2>&1 &
+    
+    local service_pid=$!
+    echo "$service_pid" > "$PIDFILE"
+    
+    # Verify service started
+    sleep 3
+    if kill -0 "$service_pid" 2>/dev/null; then
+        echo -e "${GREEN}[SUCCESS]${NC} Service started (PID: $service_pid)"
+    else
+        echo -e "${RED}[ERROR]${NC} Service failed to start"
+        rm -f "$PIDFILE"
         exit 1
     fi
-    PID=$(cat "$PIDFILE")
-    if ps -p "$PID" > /dev/null; then
-        info "Stopping service (PID: $PID)..."
-        kill "$PID"
-        while ps -p "$PID" > /dev/null; do
-            sleep 1
-        done
-        rm -f "$PIDFILE"
-        success "Service stopped."
-    else
-        error "No process found for PID: $PID. Removing PID file."
-        rm -f "$PIDFILE"
-    fi
 }
 
-# Function to display detailed service status by reading the status file.
+stop_service() {
+    echo -e "${BLUE}[INFO]${NC} Stopping service..."
+    
+    if [ ! -f "$PIDFILE" ]; then
+        echo -e "${RED}[ERROR]${NC} Service not running (no PID file)"
+        exit 1
+    fi
+    
+    local service_pid=$(cat "$PIDFILE" 2>/dev/null || echo "")
+    
+    if [ -z "$service_pid" ] || ! kill -0 "$service_pid" 2>/dev/null; then
+        echo -e "${YELLOW}[WARN]${NC} Service not running (stale PID)"
+        rm -f "$PIDFILE"
+        exit 0
+    fi
+    
+    # Graceful shutdown
+    kill -TERM "$service_pid" 2>/dev/null || true
+    
+    # Wait for shutdown
+    local wait_time=0
+    while [ $wait_time -lt 15 ] && kill -0 "$service_pid" 2>/dev/null; do
+        sleep 1
+        ((wait_time++))
+    done
+    
+    # Force kill if needed
+    if kill -0 "$service_pid" 2>/dev/null; then
+        echo -e "${YELLOW}[WARN]${NC} Force killing service"
+        kill -KILL "$service_pid" 2>/dev/null || true
+    fi
+    
+    cleanup_resources
+    rm -f "$PIDFILE"
+    
+    echo "[$(date -Iseconds)] Service stopped" >> "$HEALTH_LOG"
+    echo -e "${GREEN}[SUCCESS]${NC} Service stopped"
+}
+
 status_service() {
+    echo -e "${BLUE}[INFO]${NC} === Service Status ==="
+    
     if [ -f "$PIDFILE" ]; then
-        PID=$(cat "$PIDFILE")
-        if ps -p "$PID" > /dev/null; then
-            success "Service is running (PID: $PID)."
+        local service_pid=$(cat "$PIDFILE" 2>/dev/null || echo "")
+        if [ -n "$service_pid" ] && kill -0 "$service_pid" 2>/dev/null; then
+            echo -e "${GREEN}[SUCCESS]${NC} Service RUNNING (PID: $service_pid)"
+            ps -p "$service_pid" -o pid,ppid,%cpu,%mem,etime,cmd --no-headers 2>/dev/null || true
         else
-            error "Service is not running, but PID file exists."
+            echo -e "${RED}[ERROR]${NC} Service NOT RUNNING (stale PID)"
         fi
     else
-        error "Service is not running."
+        echo -e "${RED}[ERROR]${NC} Service NOT RUNNING (no PID file)"
     fi
-
+    
+    echo ""
     if [ -f "$STATUSFILE" ]; then
-        echo -e "${BLUE}--- Service Status ---${NC}"
+        echo -e "${BLUE}=== Current Status ===${NC}"
         cat "$STATUSFILE"
-        echo -e "${BLUE}----------------------${NC}"
+        echo ""
+    fi
+    
+    echo -e "${BLUE}=== Recent Activity ===${NC}"
+    tail -10 "$HEALTH_LOG" 2>/dev/null || echo "No health log"
+    
+    echo ""
+    echo -e "${BLUE}=== Latest Captures ===${NC}"
+    if [ -d "$BASE_DIR/heatmap_snapshots" ]; then
+        ls -lt "$BASE_DIR/heatmap_snapshots"/*.png 2>/dev/null | head -5 | while read -r line; do
+            echo "$line" | awk '{print $6, $7, $8, $9, "("$5" bytes)"}'
+        done
     else
-        info "No status file available."
+        echo "No snapshots directory"
     fi
 }
 
-# Function to restart the service
+health_check() {
+    echo -e "${BLUE}[INFO]${NC} === Health Check ==="
+    
+    local issues=0
+    
+    # Service status
+    if [ -f "$PIDFILE" ]; then
+        local service_pid=$(cat "$PIDFILE" 2>/dev/null || echo "")
+        if [ -n "$service_pid" ] && kill -0 "$service_pid" 2>/dev/null; then
+            echo -e "${GREEN}[SUCCESS]${NC} Process: RUNNING"
+        else
+            echo -e "${RED}[ERROR]${NC} Process: NOT RUNNING"
+            ((issues++))
+        fi
+    else
+        echo -e "${RED}[ERROR]${NC} Process: NO PID FILE"
+        ((issues++))
+    fi
+    
+    # Log freshness
+    if [ -f "$LOGFILE" ]; then
+        local log_age=$(( $(date +%s) - $(stat -c %Y "$LOGFILE" 2>/dev/null || echo "0") ))
+        if [ $log_age -lt 600 ]; then
+            echo -e "${GREEN}[SUCCESS]${NC} Logs: FRESH (${log_age}s ago)"
+        else
+            echo -e "${YELLOW}[WARN]${NC} Logs: STALE (${log_age}s ago)"
+            ((issues++))
+        fi
+    fi
+    
+    # Network connectivity
+    if curl -s --connect-timeout 10 https://www.google.com > /dev/null 2>&1; then
+        echo -e "${GREEN}[SUCCESS]${NC} Network: CONNECTED"
+    else
+        echo -e "${RED}[ERROR]${NC} Network: DISCONNECTED"
+        ((issues++))
+    fi
+    
+    # Memory
+    local mem=$(free -m | awk 'NR==2{print $7}')
+    if [ "$mem" -gt 300 ]; then
+        echo -e "${GREEN}[SUCCESS]${NC} Memory: ${mem}MB available"
+    else
+        echo -e "${YELLOW}[WARN]${NC} Memory: LOW (${mem}MB)"
+        ((issues++))
+    fi
+    
+    echo ""
+    if [ $issues -eq 0 ]; then
+        echo -e "${GREEN}[SUCCESS]${NC} Overall: HEALTHY"
+    else
+        echo -e "${YELLOW}[WARN]${NC} Overall: $issues issues detected"
+    fi
+    
+    return $issues
+}
+
 restart_service() {
-    stop_service
+    echo -e "${BLUE}[INFO]${NC} Restarting service..."
+    stop_service || true
+    sleep 3
     start_service
 }
 
-# Main control logic based on command-line argument
-case "$1" in
-    start)
-        start_service
-        ;;
-    stop)
-        stop_service
-        ;;
-    restart)
-        restart_service
-        ;;
-    status)
-        status_service
-        ;;
+case "${1:-}" in
+    start) start_service ;;
+    stop) stop_service ;;
+    restart) restart_service ;;
+    status) status_service ;;
+    health) health_check ;;
     *)
-        echo "Usage: $0 {start|stop|restart|status}"
+        echo "Usage: $0 {start|stop|restart|status|health}"
+        echo ""
+        echo "Commands:"
+        echo "  start   - Start the service"
+        echo "  stop    - Stop the service" 
+        echo "  restart - Restart the service"
+        echo "  status  - Show service status"
+        echo "  health  - Health check"
         exit 1
         ;;
 esac

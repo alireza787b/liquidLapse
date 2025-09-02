@@ -1,27 +1,15 @@
-#!/usr/bin/env python3
 """
-Preprocessor for Liquidity Heatmap Image Dataset with Future Prediction Features
+Enhanced Preprocessor for Liquidity Heatmap Dataset - Production Version
 
-This script processes heatmap images stored in a source directory by:
-  - Parsing filenames to extract date, time, currency, and price.
-  - Interpolating missing price values (marked as 'NA') via linear interpolation.
-  - Computing the step change (relative to previous valid price) and configurable time-window-based historic change.
-  - Computing flexible future prediction features: one-step-ahead, N-step, and time-window-based future price and change ratios, plus average change over the interval.
-    If future data is unavailable for a given horizon, the corresponding fields are set to None.
-  - Copying images into a target session folder under an "images" subfolder, renaming files with metadata (ID, timestamp, currency, price, encoded change).
-  - Generating a JSON file (dataset_info.json) within the session folder containing metadata for all processed images, including future prediction fields.
+Critical improvements:
+- Robust price parsing with multiple formats
+- Intelligent future horizon validation  
+- Data quality checks and validation
+- Gap detection and handling
+- Professional error reporting
 
-Configuration for future predictions is centralized at the top of the script for easy tuning.
-
-Usage:
-    python preprocess.py \
-      --session test1 \
-      [--source_dir <path>] \
-      [--ai_process_dir <path>] \
-      [--future_horizons "label1:step=1;label2:window=86400;..."]
-
-Author: Alireza Ghaderi
-Date: 2025-05-11
+Author: Enhanced for liquidLapse production
+Date: 2025-09-01
 """
 
 import os
@@ -31,79 +19,335 @@ import json
 import shutil
 import argparse
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional
+
+# Enhanced logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # =============================================================================
-# Global parameters (modifiable here; command-line arguments override these)
+# Configuration (Auto-adjusted based on data analysis)
 # =============================================================================
 DEFAULT_SOURCE_DIR = os.path.expanduser("~/liquidLapse/heatmap_snapshots")
 DEFAULT_AI_PROCESS_DIR = os.path.expanduser("~/liquidLapse/ai_process")
 DEFAULT_SESSION_NAME = "test1"
 
-# -----------------------------------------------------------------------------
-# Future prediction configuration:
-# Define a list of horizons; each entry must have a unique 'label' and either:
-#   - 'step_count': integer number of steps ahead
-#   - 'window_seconds': integer seconds ahead
-# Example:
-# FUTURE_HORIZONS = [
-#     {'label': 'one_step',   'step_count': 1},
-#     {'label': 'future_1d',  'window_seconds': 86400},  # 1-day window
-#     {'label': 'five_min',   'window_seconds': 300},
-#     {'label': 'step3',      'step_count': 3},
-# ]
+# Intelligent future horizons (will be validated against actual data)
 FUTURE_HORIZONS = [
     {'label': 'one_step',   'step_count': 1},
-    {'label': 'future_1h',  'window_seconds': 3600},  # Default 1-hour window
-    {'label': 'future_4h',  'window_seconds': 14400},  # Default 4-hour window
-    {'label': 'future_1d',  'window_seconds': 86400},  # Default 1-day window
+    {'label': 'future_30m', 'window_seconds': 1800},   # 30 minutes
+    {'label': 'future_1h',  'window_seconds': 3600},   # 1 hour
+    {'label': 'future_4h',  'window_seconds': 14400},  # 4 hours
 ]
-# -----------------------------------------------------------------------------
 
-# Logging configuration for detailed output
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Data quality thresholds
+MIN_IMAGES_REQUIRED = 100      # Minimum images for meaningful training
+MAX_TIME_GAP_MINUTES = 30      # Maximum acceptable gap between captures
+MIN_FUTURE_COVERAGE = 0.7      # Minimum 70% of images must have future targets
 
-# =============================================================================
-# Helper Functions
-# =============================================================================
+class DataQualityValidator:
+    """Professional data quality validation"""
+    
+    def __init__(self):
+        self.issues = []
+        self.warnings = []
+        
+    def add_issue(self, message: str):
+        self.issues.append(message)
+        logging.error(f"DATA ISSUE: {message}")
+        
+    def add_warning(self, message: str):
+        self.warnings.append(message)
+        logging.warning(f"DATA WARNING: {message}")
+        
+    def validate_dataset(self, images_info: List[Dict]) -> bool:
+        """Comprehensive dataset validation"""
+        if len(images_info) < MIN_IMAGES_REQUIRED:
+            self.add_issue(f"Insufficient data: {len(images_info)} images (minimum: {MIN_IMAGES_REQUIRED})")
+            
+        # Check time gaps
+        gaps = []
+        for i in range(1, len(images_info)):
+            time_diff = (images_info[i]['timestamp'] - images_info[i-1]['timestamp']).total_seconds() / 60
+            if time_diff > MAX_TIME_GAP_MINUTES:
+                gaps.append((i-1, i, time_diff))
+        
+        if gaps:
+            self.add_warning(f"Found {len(gaps)} time gaps > {MAX_TIME_GAP_MINUTES} minutes")
+            for start_idx, end_idx, minutes in gaps[:5]:  # Show first 5
+                logging.warning(f"  Gap: {minutes:.1f}min between images {start_idx}-{end_idx}")
+                
+        # Check price data quality
+        null_prices = sum(1 for img in images_info if img['price'] is None)
+        if null_prices > len(images_info) * 0.1:  # >10% null prices
+            self.add_warning(f"High null price rate: {null_prices}/{len(images_info)} ({null_prices/len(images_info)*100:.1f}%)")
+            
+        return len(self.issues) == 0
 
-def parse_filename(filename):
+def parse_filename_robust(filename: str) -> Optional[Dict]:
     """
-    Parse the filename to extract date, time, currency, and price.
-    Expected format: heatmap_YYYY-MM-DD_HH-MM-SS_CURRENCY-price.png
+    Robust filename parsing with multiple format support
     """
     pattern = r'heatmap_(\d{4}-\d{2}-\d{2})_(\d{2}-\d{2}-\d{2})_([A-Z]+)-(.+?)\.png$'
     basename = os.path.basename(filename)
     match = re.match(pattern, basename)
+    
     if not match:
-        logging.warning(f"Filename {basename} does not match expected pattern.")
+        logging.warning(f"Filename {basename} does not match expected pattern")
         return None
+        
     date_str, time_str, currency, price_str = match.groups()
+    
     try:
-        price = float(price_str)
-    except ValueError:
-        price = None  # Mark missing prices as None
-    timestamp = datetime.strptime(f"{date_str} {time_str.replace('-', ':')}", "%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.strptime(f"{date_str} {time_str.replace('-', ':')}", "%Y-%m-%d %H:%M:%S")
+    except ValueError as e:
+        logging.error(f"Invalid timestamp in {basename}: {e}")
+        return None
+    
+    # Robust price parsing
+    price = parse_price_robust(price_str)
+    
     return {
         'date_str': date_str,
         'time_str': time_str,
         'currency': currency,
         'price': price,
-        'timestamp': timestamp
+        'timestamp': timestamp,
+        'original_price_str': price_str  # Keep original for debugging
     }
 
-
-def get_all_image_files(source_dir):
+def parse_price_robust(price_str: str) -> Optional[float]:
     """
-    Return sorted list of all heatmap PNG files in source_dir.
+    Robust price parsing supporting multiple formats:
+    - "67000.12"
+    - "67,000.12" 
+    - "67000.12USD"
+    - "NA" (missing)
     """
-    return sorted(glob.glob(os.path.join(source_dir, "heatmap_*.png")))
+    if not price_str or price_str.upper() in ['NA', 'NULL', 'NONE']:
+        return None
+        
+    # Clean the price string
+    cleaned = re.sub(r'[,$A-Za-z\s]', '', price_str)
+    
+    try:
+        return float(cleaned)
+    except ValueError:
+        logging.warning(f"Could not parse price: '{price_str}' -> '{cleaned}'")
+        return None
 
+def analyze_capture_interval(images_info: List[Dict]) -> float:
+    """Analyze actual capture interval from data"""
+    if len(images_info) < 2:
+        return 300.0  # Default 5 minutes
+        
+    intervals = []
+    for i in range(1, min(len(images_info), 20)):  # Sample first 20 intervals
+        diff = (images_info[i]['timestamp'] - images_info[i-1]['timestamp']).total_seconds()
+        intervals.append(diff)
+    
+    avg_interval = sum(intervals) / len(intervals)
+    logging.info(f"Detected average capture interval: {avg_interval:.0f} seconds ({avg_interval/60:.1f} minutes)")
+    
+    return avg_interval
 
+def validate_future_horizons(images_info: List[Dict], future_horizons: List[Dict], capture_interval: float) -> List[Dict]:
+    """
+    Validate and adjust future horizons based on actual data availability
+    """
+    total_span = (images_info[-1]['timestamp'] - images_info[0]['timestamp']).total_seconds()
+    
+    validated_horizons = []
+    
+    for horizon in future_horizons:
+        if 'step_count' in horizon:
+            # Step-based horizon
+            max_steps_available = len(images_info) - 1
+            if horizon['step_count'] <= max_steps_available:
+                validated_horizons.append(horizon)
+                logging.info(f"✓ Future horizon '{horizon['label']}': {horizon['step_count']} steps")
+            else:
+                logging.warning(f"✗ Skipping '{horizon['label']}': needs {horizon['step_count']} steps, only {max_steps_available} available")
+                
+        elif 'window_seconds' in horizon:
+            # Time-based horizon
+            if horizon['window_seconds'] < total_span:
+                # Check how many images would have this target available
+                coverage = 0
+                for i in range(len(images_info)):
+                    future_time = images_info[i]['timestamp'] + timedelta(seconds=horizon['window_seconds'])
+                    if any(abs((img['timestamp'] - future_time).total_seconds()) < capture_interval for img in images_info[i+1:]):
+                        coverage += 1
+                
+                coverage_ratio = coverage / len(images_info)
+                
+                if coverage_ratio >= MIN_FUTURE_COVERAGE:
+                    validated_horizons.append(horizon)
+                    logging.info(f"✓ Future horizon '{horizon['label']}': {horizon['window_seconds']}s ({coverage_ratio*100:.1f}% coverage)")
+                else:
+                    logging.warning(f"✗ Skipping '{horizon['label']}': only {coverage_ratio*100:.1f}% coverage (minimum: {MIN_FUTURE_COVERAGE*100:.1f}%)")
+            else:
+                logging.warning(f"✗ Skipping '{horizon['label']}': needs {horizon['window_seconds']}s, only {total_span:.0f}s available")
+    
+    return validated_horizons
+
+def process_images_enhanced(source_dir: str, target_session_dir: str, future_horizons: List[Dict]) -> List[Dict]:
+    """
+    Enhanced image processing with validation and quality checks
+    """
+    # Get all files
+    files = sorted(glob.glob(os.path.join(source_dir, "heatmap_*.png")))
+    if not files:
+        raise ValueError("No heatmap files found in source directory")
+    
+    logging.info(f"Found {len(files)} heatmap files")
+    
+    # Parse filenames
+    images_info = []
+    failed_parses = 0
+    
+    for filepath in files:
+        info = parse_filename_robust(filepath)
+        if info:
+            info['original_filepath'] = filepath
+            images_info.append(info)
+        else:
+            failed_parses += 1
+    
+    if failed_parses > 0:
+        logging.warning(f"Failed to parse {failed_parses} filenames")
+    
+    if not images_info:
+        raise ValueError("No valid heatmap files could be parsed")
+    
+    # Sort by timestamp
+    images_info.sort(key=lambda x: x['timestamp'])
+    
+    # Data quality validation
+    validator = DataQualityValidator()
+    if not validator.validate_dataset(images_info):
+        raise ValueError(f"Data quality validation failed: {validator.issues}")
+    
+    # Analyze capture interval
+    capture_interval = analyze_capture_interval(images_info)
+    
+    # Validate and adjust future horizons
+    validated_horizons = validate_future_horizons(images_info, future_horizons, capture_interval)
+    
+    if not validated_horizons:
+        raise ValueError("No valid future horizons available for this dataset")
+    
+    # Interpolate missing prices
+    interpolated_count = 0
+    for i, info in enumerate(images_info):
+        if info['price'] is None:
+            interpolated = interpolate_price(i, images_info)
+            if interpolated is not None:
+                info['price'] = interpolated
+                info['interpolated'] = True
+                interpolated_count += 1
+            else:
+                info['interpolated'] = False
+        else:
+            info['interpolated'] = False
+    
+    logging.info(f"Interpolated {interpolated_count} missing prices")
+    
+    # Compute changes and future targets
+    prev_price = None
+    for i, info in enumerate(images_info):
+        # Step change
+        if prev_price is not None and info['price'] is not None:
+            info['change_percent_step'] = round((info['price'] - prev_price) / prev_price * 100, 3)
+        else:
+            info['change_percent_step'] = 0.0
+        
+        # Encode change
+        change_pct = info['change_percent_step']
+        fmt = f"{abs(change_pct):06.3f}"
+        info['change'] = ('p' if change_pct >= 0 else 'n') + fmt.replace('.', '')
+        
+        # Window-based historic change (24 hours)
+        info['change_percent_window'] = compute_time_window_change(info, images_info, i, 86400)
+        
+        # Future predictions for validated horizons
+        for horizon in validated_horizons:
+            label = horizon['label']
+            fut_price, fut_pct, avg_pct = compute_future_info(
+                i, images_info, 
+                step_count=horizon.get('step_count'),
+                window_seconds=horizon.get('window_seconds')
+            )
+            info[f'future_{label}_price'] = fut_price
+            info[f'future_{label}_change_percent'] = fut_pct
+            info[f'avg_{label}_change_percent'] = avg_pct
+        
+        # Update previous price
+        if info['price'] is not None:
+            prev_price = info['price']
+    
+    # Add UNIX timestamps
+    for info in images_info:
+        info['unix_timestamp'] = int(info['timestamp'].timestamp())
+    
+    # Create output structure
+    imgs_dir = os.path.join(target_session_dir, 'images')
+    if os.path.exists(imgs_dir):
+        shutil.rmtree(imgs_dir)
+    os.makedirs(imgs_dir, exist_ok=True)
+    
+    # Process and copy files
+    metadata = []
+    for idx, info in enumerate(images_info, start=1):
+        price_str = f"{info['price']:.2f}".replace('.', '') if info['price'] is not None else 'NA'
+        new_name = (
+            f"{idx:06d}_{info['timestamp'].strftime('%Y%m%d_%H%M%S')}_"
+            f"{info['currency']}_{price_str}_{info['change']}"
+        )
+        
+        dst_path = os.path.join(imgs_dir, new_name + '.png')
+        shutil.copy2(info['original_filepath'], dst_path)
+        
+        # Create metadata entry
+        entry = {
+            'id': idx,
+            'original_filepath': info['original_filepath'],
+            'new_filename': new_name,
+            'target_filepath': dst_path,
+            'date_str': info['date_str'],
+            'time_str': info['time_str'],
+            'timestamp': info['timestamp'].strftime("%Y-%m-%d %H:%M:%S"),
+            'unix_timestamp': info['unix_timestamp'],
+            'currency': info['currency'],
+            'price': info['price'],
+            'change': info['change'],
+            'change_percent_step': info['change_percent_step'],
+            'change_percent_window': info['change_percent_window'],
+            'interpolated': info['interpolated']
+        }
+        
+        # Add future fields for validated horizons only
+        for horizon in validated_horizons:
+            label = horizon['label']
+            entry[f'future_{label}_price'] = info.get(f'future_{label}_price')
+            entry[f'future_{label}_change_percent'] = info.get(f'future_{label}_change_percent')
+            entry[f'avg_{label}_change_percent'] = info.get(f'avg_{label}_change_percent')
+        
+        metadata.append(entry)
+    
+    # Summary statistics
+    valid_targets = {}
+    for horizon in validated_horizons:
+        label = horizon['label']
+        count = sum(1 for entry in metadata if entry.get(f'future_{label}_change_percent') is not None)
+        valid_targets[label] = count
+        logging.info(f"Future target '{label}': {count}/{len(metadata)} ({count/len(metadata)*100:.1f}%) valid")
+    
+    return metadata
+
+# Keep original helper functions (interpolate_price, compute_time_window_change, compute_future_info)
 def interpolate_price(index, images_info):
-    """
-    Linear interpolate missing price using nearest valid neighbors.
-    """
+    """Linear interpolate missing price using nearest valid neighbors."""
     prev_i = index - 1
     while prev_i >= 0 and images_info[prev_i]['price'] is None:
         prev_i -= 1
@@ -121,24 +365,8 @@ def interpolate_price(index, images_info):
     frac = (images_info[index]['timestamp'] - prev_info['timestamp']).total_seconds() / total_secs
     return prev_info['price'] + (next_info['price'] - prev_info['price']) * frac
 
-
-def compute_change_info(current_price, previous_price):
-    """
-    Compute encoded and numeric percent change from previous_price.
-    """
-    if previous_price is None or current_price is None:
-        return {'encoded': 'p0000', 'change_percent': 0.0}
-    pct = round((current_price - previous_price) / previous_price * 100, 3)
-    fmt = f"{abs(pct):06.3f}"  # zero-padded to fixed width
-    code = ('p' if pct >= 0 else 'n') + fmt.replace('.', '')
-    return {'encoded': code, 'change_percent': pct}
-
-
 def compute_time_window_change(current_info, images_info, idx, window_seconds):
-    """
-    Compute percent change from price at least window_seconds before current timestamp.
-    Returns 0.0 if no valid historic data.
-    """
+    """Compute percent change from price at least window_seconds before current timestamp."""
     now_ts = current_info['timestamp']
     for j in range(idx - 1, -1, -1):
         past = images_info[j]
@@ -146,16 +374,12 @@ def compute_time_window_change(current_info, images_info, idx, window_seconds):
             return round((current_info['price'] - past['price']) / past['price'] * 100, 3)
     return 0.0
 
-
 def compute_future_info(current_index, images_info, step_count=None, window_seconds=None):
-    """
-    Compute future price & change at a given step_count ahead or window_seconds ahead,
-    plus average change over the interval. If unavailable, returns (None, None, None).
-    """
+    """Compute future price & change at given step_count or window_seconds ahead."""
     cur = images_info[current_index]
     cur_price = cur['price']
     future_idx = None
-    # Determine future index by step or time window
+    
     if step_count is not None:
         idx = current_index + step_count
         if idx < len(images_info):
@@ -165,15 +389,17 @@ def compute_future_info(current_index, images_info, step_count=None, window_seco
             if (images_info[j]['timestamp'] - cur['timestamp']).total_seconds() >= window_seconds:
                 future_idx = j
                 break
-    # If no future data, return nulls
+    
     if future_idx is None:
         return None, None, None
+        
     fut_price = images_info[future_idx]['price']
     if cur_price is None or fut_price is None:
         return None, None, None
-    # Percent change
+        
     pct_change = round((fut_price - cur_price) / cur_price * 100, 3)
-    # Average percent change over each intermediate step
+    
+    # Average change over interval
     total_pct, count = 0.0, 0
     for k in range(current_index + 1, future_idx + 1):
         prev_p = images_info[k - 1]['price']
@@ -182,154 +408,49 @@ def compute_future_info(current_index, images_info, step_count=None, window_seco
             step_pct = (next_p - prev_p) / prev_p * 100
             total_pct += step_pct
             count += 1
+    
     avg_pct = round(total_pct / count, 3) if count > 0 else pct_change
+    
     return fut_price, pct_change, avg_pct
 
-
-def process_images(source_dir, target_session_dir, future_horizons):
-    """
-    Main pipeline: parse, interpolate, compute changes & future features, copy, metadata.
-    """
-    files = get_all_image_files(source_dir)
-    if not files:
-        logging.error("No image files found in source directory.")
-        return []
-    images_info = []
-    for fp in files:
-        info = parse_filename(fp)
-        if info:
-            info['original_filepath'] = fp
-            images_info.append(info)
-    images_info.sort(key=lambda x: x['timestamp'])
-
-    # Interpolate missing prices
-    for i, inf in enumerate(images_info):
-        if inf['price'] is None:
-            interp = interpolate_price(i, images_info)
-            inf['price'] = interp
-            inf['interpolated'] = interp is not None
-        else:
-            inf['interpolated'] = False
-
-    # Compute step change & historic window change
-    prev_price = None
-    for i, inf in enumerate(images_info):
-        ch = compute_change_info(inf['price'], prev_price)
-        inf['change'] = ch['encoded']
-        inf['change_percent_step'] = ch['change_percent']
-        # You can configure custom historic windows similarly by calling compute_time_window_change
-        inf['change_percent_window'] = compute_time_window_change(inf, images_info, i, window_seconds=86400)
-        prev_price = inf['price'] if inf['price'] is not None else prev_price
-
-    # Compute future prediction features
-    for i, inf in enumerate(images_info):
-        for cfg in future_horizons:
-            label = cfg['label']
-            fut_price, fut_pct, avg_pct = compute_future_info(
-                i, images_info,
-                step_count=cfg.get('step_count'),
-                window_seconds=cfg.get('window_seconds')
-            )
-            inf[f'future_{label}_price'] = fut_price
-            inf[f'future_{label}_change_percent'] = fut_pct
-            inf[f'avg_{label}_change_percent'] = avg_pct
-
-    # Add UNIX timestamp
-    for inf in images_info:
-        inf['unix_timestamp'] = int(inf['timestamp'].timestamp())
-
-    # Prepare output folder
-    imgs_dir = os.path.join(target_session_dir, 'images')
-    if os.path.exists(imgs_dir): shutil.rmtree(imgs_dir)
-    os.makedirs(imgs_dir, exist_ok=True)
-
-    metadata = []
-    for idx, inf in enumerate(images_info, start=1):
-        price_str = f"{inf['price']:.2f}".replace('.', '') if inf['price'] is not None else 'NA'
-        new_name = (
-            f"{idx}_{inf['timestamp'].strftime('%Y%m%d_%H%M%S')}_"
-            f"{inf['currency']}_{price_str}_{inf['change']}"
-        )
-        dst = os.path.join(imgs_dir, new_name + '.png')
-        shutil.copy2(inf['original_filepath'], dst)
-
-        entry = {
-            'id': idx,
-            'original_filepath': inf['original_filepath'],
-            'new_filename': new_name,
-            'target_filepath': dst,
-            'date_str': inf['date_str'],
-            'time_str': inf['time_str'],
-            'timestamp': inf['timestamp'].strftime("%Y-%m-%d %H:%M:%S"),
-            'unix_timestamp': inf['unix_timestamp'],
-            'currency': inf['currency'],
-            'price': inf['price'],
-            'change': inf['change'],
-            'change_percent_step': inf['change_percent_step'],
-            'change_percent_window': inf['change_percent_window'],
-            'interpolated': inf['interpolated']
-        }
-        # Include future fields
-        for cfg in future_horizons:
-            l = cfg['label']
-            entry[f'future_{l}_price'] = inf.get(f'future_{l}_price')
-            entry[f'future_{l}_change_percent'] = inf.get(f'future_{l}_change_percent')
-            entry[f'avg_{l}_change_percent'] = inf.get(f'avg_{l}_change_percent')
-        metadata.append(entry)
-
-    return metadata
-
-
-def write_metadata_json(metadata, session_dir):
-    """
-    Write metadata list to dataset_info.json in session_dir.
-    """
-    path = os.path.join(session_dir, 'dataset_info.json')
-    with open(path, 'w') as f:
-        json.dump(metadata, f, indent=4, default=str)
-    logging.info(f"Wrote metadata JSON to {path}")
-
-
-def parse_future_horizons(arg_str):
-    """
-    Parse CLI string like "lab1:step=1;lab2:window=86400" into list of configs.
-    Defaults to FUTURE_HORIZONS if unspecified.
-    """
-    if not arg_str:
-        return FUTURE_HORIZONS
-    out = []
-    for part in arg_str.split(';'):
-        label, spec = part.split(':', 1)
-        key, val = spec.split('=', 1)
-        if key == 'step':
-            out.append({'label': label, 'step_count': int(val)})
-        elif key == 'window':
-            out.append({'label': label, 'window_seconds': int(val)})
-    return out
-
-
 def main(args):
-    source_dir = os.path.expanduser(args.source_dir) if args.source_dir else DEFAULT_SOURCE_DIR
-    ai_dir = os.path.expanduser(args.ai_process_dir) if args.ai_process_dir else DEFAULT_AI_PROCESS_DIR
-    session = args.session if args.session else DEFAULT_SESSION_NAME
-    futures = parse_future_horizons(args.future_horizons)
+    source_dir = os.path.expanduser(args.source_dir or DEFAULT_SOURCE_DIR)
+    ai_dir = os.path.expanduser(args.ai_process_dir or DEFAULT_AI_PROCESS_DIR)
+    session = args.session or DEFAULT_SESSION_NAME
+    
     target_dir = os.path.join(ai_dir, session)
-    if os.path.exists(target_dir): shutil.rmtree(target_dir)
+    
+    logging.info(f"Starting enhanced preprocessing...")
+    logging.info(f"Source: {source_dir}")
+    logging.info(f"Target: {target_dir}")
+    logging.info(f"Session: {session}")
+    
+    # Clean target directory
+    if os.path.exists(target_dir):
+        shutil.rmtree(target_dir)
     os.makedirs(target_dir, exist_ok=True)
-
-    logging.info(f"Processing {source_dir} into {target_dir} with future horizons: {futures}")
-    metadata = process_images(source_dir, target_dir, futures)
-    write_metadata_json(metadata, target_dir)
-    logging.info("Preprocessing with future prediction features completed successfully.")
+    
+    try:
+        # Process with validation
+        metadata = process_images_enhanced(source_dir, target_dir, FUTURE_HORIZONS)
+        
+        # Write metadata
+        metadata_path = os.path.join(target_dir, 'dataset_info.json')
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=4, default=str)
+        
+        logging.info(f"✓ Processing completed successfully")
+        logging.info(f"✓ Processed {len(metadata)} images")
+        logging.info(f"✓ Metadata saved: {metadata_path}")
+        
+    except Exception as e:
+        logging.error(f"✗ Processing failed: {e}")
+        raise
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description="Preprocess heatmap images with flexible future prediction features."
-    )
-    parser.add_argument('--source_dir', type=str, help='Path to heatmap images source directory')
-    parser.add_argument('--ai_process_dir', type=str, help='Base output directory for AI processing')
-    parser.add_argument('--session', type=str, help='Session name (subfolder)')
-    parser.add_argument('--future_horizons', type=str,
-                        help='Future horizons spec, e.g.: "one:step=1;day:window=86400"')
+    parser = argparse.ArgumentParser(description="Enhanced preprocess with validation")
+    parser.add_argument('--source_dir', type=str, help='Source directory')
+    parser.add_argument('--ai_process_dir', type=str, help='AI process directory') 
+    parser.add_argument('--session', type=str, help='Session name')
     args = parser.parse_args()
     main(args)
