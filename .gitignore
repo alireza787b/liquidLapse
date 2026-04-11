@@ -180,6 +180,8 @@ cython_debug/
 
 
 heatmap_snapshots/
+backup_staging/
+restore_staging/
 
 *.status
 

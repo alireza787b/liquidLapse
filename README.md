@@ -55,6 +55,8 @@ liquidLapse/
 ├── README.md                  # Project documentation
 ├── setup.sh                   # Setup script for installing dependencies
 ├── service.sh                 # Service script to manage the liquidLapse process
+├── docs/                      # Operational docs for backup / restore workflows
+│   └── backup_restore.md
 └── ai_process/                # Directory for AI processing outputs
     └── session_name/          # Session folders (named by date/time)
         ├── dataset_info.json  # Metadata for all processed images
@@ -83,6 +85,8 @@ Make the setup script executable:
 ```bash
 chmod +x setup.sh
 chmod +x service.sh
+chmod +x backup_heatmaps_to_mega.sh
+chmod +x restore_heatmaps_from_mega.sh
 ```
 
 Then run it:
@@ -212,9 +216,16 @@ The API provides a `/predict` endpoint where you can get predictions based on th
   * Runtime logs are saved to `liquidLapseService.log`.
   * Status information is saved in `liquidLapseService.status`.
 
+* **Heatmap backup / restore:**
+
+  * The live `heatmap_snapshots/` layout stays flat and unchanged.
+  * Use `./backup_heatmaps_to_mega.sh` to freeze the current batch, snapshot metadata, generate manifests, and upload to MEGA.
+  * Use `./restore_heatmaps_from_mega.sh` to download a batch, verify it, and optionally merge it back into the live flat folder.
+  * `sync_heatmaps.sh` remains the legacy rsync pull helper for a different host-to-host workflow.
+  * Batch-based backup, MEGA reuse, optional SSH relay, verification, and safe restore steps are documented in [docs/backup_restore.md](docs/backup_restore.md).
+
 ---
 
 ## License
 
 This project is licensed under the Apache 2.0 License.
-
