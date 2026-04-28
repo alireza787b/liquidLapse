@@ -1,0 +1,20 @@
+[Unit]
+Description=liquidLapse heatmap capture service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/liquidLapse
+ExecStart=/root/liquidLapse/service.sh run
+ExecStop=/root/liquidLapse/service.sh stop
+Restart=always
+RestartSec=20
+StartLimitIntervalSec=300
+StartLimitBurst=5
+KillMode=control-group
+TimeoutStopSec=45
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

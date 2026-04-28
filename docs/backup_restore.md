@@ -32,6 +32,22 @@ backup_staging/<batch_name>/
 
 The active live folder is immediately recreated after freeze so capture can continue. The archive structure is for backup only; restore merges PNGs back into the flat live directory.
 
+## Service Continuity
+
+`./service.sh start` starts the capture loop in the background. `./service.sh run` runs the same loop in the foreground and is the preferred entry point for `systemd`, containers, or `tmux`.
+
+For production Linux hosts, install `deploy/liquidlapse-capture.service` and let systemd own the foreground loop:
+
+```bash
+sudo install -m 0644 deploy/liquidlapse-capture.service /etc/systemd/system/liquidlapse-capture.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now liquidlapse-capture.service
+```
+
+`tmux` is acceptable for manual maintenance, but it only survives SSH disconnects while the tmux server remains alive. It does not survive a killed tmux session or host reboot.
+
+The backup script stops the service only around the freeze window when it finds a running PID. It restarts the service after the live folder has been recreated, so new captures continue in a fresh flat `heatmap_snapshots/` directory while the frozen batch uploads.
+
 ## MEGA Transport Modes
 
 The scripts support two MEGA modes:
@@ -48,6 +64,8 @@ The scripts prefer an existing MEGA session. If no session exists, they can log 
 - `--mega-auth-code` for MFA when needed
 
 Session reuse is the preferred mode for routine runs.
+
+The MEGA root folder may already exist. Backup creation is idempotent at the root level and verifies that the target folder exists before uploading a batch.
 
 ## Backup Usage
 
@@ -75,6 +93,19 @@ Useful options:
 - `--delete-local-after-upload` to remove the local staged batch only after MEGA count verification succeeds
 - `--delete-relay-after-upload` to clear relay staging after a successful upload
 - `--yes` for non-interactive automation
+
+For regular space-saving maintenance on the current relay setup:
+
+```bash
+./backup_heatmaps_to_mega.sh \
+  --relay-host root@204.168.181.45 \
+  --mega-root /Root/liquidLapse_backups/heatmap_snapshots_batches \
+  --delete-local-after-upload \
+  --delete-relay-after-upload \
+  --yes
+```
+
+This freezes the current live folder, uploads and verifies the structured batch, then removes local and relay staging after the remote file count matches.
 
 ## Restore Usage
 

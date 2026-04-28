@@ -190,6 +190,7 @@ ai_process/test1/
 *.json
 
 # Runtime files (should never be committed)
+.codex
 *.pid
 *.log
 *.status

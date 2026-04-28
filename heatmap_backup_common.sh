@@ -223,11 +223,17 @@ ops_ensure_mega_session() {
 
 ops_mega_mkdir() {
     if [[ "${MEGA_MODE:-}" == "local" ]]; then
-        mega-mkdir -p "$1"
+        if mega-mkdir -p "$1" 2>/dev/null; then
+            return
+        fi
+        mega-find "$1" --type=d >/dev/null 2>&1 || return 1
         return
     fi
 
-    ops_relay_exec mega-mkdir -p "$1"
+    if ops_relay_exec mega-mkdir -p "$1" 2>/dev/null; then
+        return
+    fi
+    ops_relay_exec mega-find "$1" --type=d >/dev/null 2>&1
 }
 
 ops_mega_put_dir() {
