@@ -92,6 +92,8 @@ Useful options:
 - `--no-ai-metadata` to skip the `ai_process` JSON snapshot
 - `--delete-local-after-upload` to remove the local staged batch only after MEGA count verification succeeds
 - `--delete-relay-after-upload` to clear relay staging after a successful upload
+- `--chunked-relay-upload` to upload through a low-free-space relay without staging the full batch on the relay
+- `--relay-chunk-files COUNT` to control how many PNGs are staged per relay chunk; the default is `1000`
 - `--yes` for non-interactive automation
 
 For regular space-saving maintenance on the current relay setup:
@@ -106,6 +108,22 @@ For regular space-saving maintenance on the current relay setup:
 ```
 
 This freezes the current live folder, uploads and verifies the structured batch, then removes local and relay staging after the remote file count matches.
+
+For shutdown or low-disk maintenance on the Hetzner relay, stop capture first and use chunked relay upload:
+
+```bash
+./service.sh stop
+./backup_heatmaps_to_mega.sh \
+  --relay-host root@204.168.181.45 \
+  --mega-root /Root/liquidLapse_backups/heatmap_snapshots_batches \
+  --chunked-relay-upload \
+  --relay-chunk-files 1000 \
+  --delete-local-after-upload \
+  --delete-relay-after-upload \
+  --yes
+```
+
+Chunked relay upload preserves the same structured MEGA batch layout as a normal backup. It only changes transport: each subset of `heatmap_snapshots/` is staged on the relay, uploaded into the remote batch folder, and removed from relay staging before the next subset is copied.
 
 ## Restore Usage
 

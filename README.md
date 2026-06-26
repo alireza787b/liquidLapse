@@ -240,6 +240,7 @@ The API provides a `/predict` endpoint where you can get predictions based on th
   * The live `heatmap_snapshots/` layout stays flat and unchanged.
   * Use `./backup_heatmaps_to_mega.sh` to freeze the current batch, snapshot metadata, generate manifests, and upload to MEGA.
   * Use `./restore_heatmaps_from_mega.sh` to download a batch, verify it, and optionally merge it back into the live flat folder.
+  * Use `--chunked-relay-upload` with the Hetzner relay (`root@204.168.181.45`) when the relay cannot hold the full staged batch at once.
   * Existing MEGA backup folders are reused safely, so routine uploads can target the same MEGA root.
   * `sync_heatmaps.sh` remains the legacy rsync pull helper for a different host-to-host workflow.
   * Batch-based backup, MEGA reuse, optional SSH relay, verification, and safe restore steps are documented in [docs/backup_restore.md](docs/backup_restore.md).

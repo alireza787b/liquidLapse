@@ -16,6 +16,8 @@ OPS_DRY_RUN=0
 OPS_INCLUDE_AI_METADATA=1
 OPS_DELETE_LOCAL_AFTER_UPLOAD=0
 OPS_DELETE_RELAY_AFTER_UPLOAD=0
+OPS_CHUNKED_RELAY_UPLOAD=0
+OPS_RELAY_CHUNK_FILES=1000
 BATCH_NAME=""
 
 usage() {
@@ -33,6 +35,8 @@ Options:
   --no-ai-metadata               Skip ai_process JSON metadata snapshot.
   --delete-local-after-upload    Delete the local staged batch after verification.
   --delete-relay-after-upload    Delete the relay staged batch after verification.
+  --chunked-relay-upload         Upload relay batches in small chunks to reduce relay disk use.
+  --relay-chunk-files COUNT      Files per relay upload chunk. Default: 1000.
   --mega-email EMAIL             MEGA login email if no active session exists.
   --mega-password PASSWORD       MEGA login password if no active session exists.
   --mega-auth-code CODE          MFA code for MEGA login when required.
@@ -114,6 +118,15 @@ parse_args() {
                 OPS_DELETE_RELAY_AFTER_UPLOAD=1
                 shift
                 ;;
+            --chunked-relay-upload)
+                OPS_CHUNKED_RELAY_UPLOAD=1
+                shift
+                ;;
+            --relay-chunk-files)
+                OPS_RELAY_CHUNK_FILES="${2:?Missing value for --relay-chunk-files}"
+                [[ "$OPS_RELAY_CHUNK_FILES" =~ ^[0-9]+$ && "$OPS_RELAY_CHUNK_FILES" -gt 0 ]] || ops_fail "--relay-chunk-files must be a positive integer"
+                shift 2
+                ;;
             --mega-email)
                 MEGA_EMAIL="${2:?Missing value for --mega-email}"
                 shift 2
@@ -143,6 +156,66 @@ parse_args() {
                 ;;
         esac
     done
+}
+
+upload_small_dir_via_relay() {
+    local local_dir="$1"
+    local relay_batch_path="$2"
+
+    [[ -d "$local_dir" ]] || return 0
+
+    ops_relay_exec mkdir -p "$relay_batch_path"
+    rsync -az "$local_dir" "${MEGA_RELAY_HOST}:${relay_batch_path%/}/"
+    ops_mega_put_dir "$relay_batch_path/$(basename "$local_dir")" "$MEGA_REMOTE_ROOT/$BATCH_NAME" >/dev/null
+    ops_relay_exec rm -rf "$relay_batch_path/$(basename "$local_dir")"
+}
+
+upload_batch_via_chunked_relay() {
+    local batch_dir="$1"
+    local relay_batch_path="$2"
+    local chunk_list_dir="$batch_dir/.relay_upload_chunks"
+    local all_pngs="$chunk_list_dir/all_pngs.txt"
+    local chunk_file
+    local chunk_number=0
+    local chunk_count
+    local files_in_chunk
+
+    [[ "${MEGA_MODE:-}" == "relay" ]] || ops_fail "Chunked relay upload requires relay MEGA mode"
+    ops_require_command split
+
+    rm -rf "$chunk_list_dir"
+    mkdir -p "$chunk_list_dir"
+
+    (
+        cd "$batch_dir"
+        find heatmap_snapshots -maxdepth 1 -type f -name 'heatmap_*.png' -printf '%P\n' \
+            | sort \
+            | sed 's#^#heatmap_snapshots/#' > "$all_pngs"
+    )
+
+    split -l "$OPS_RELAY_CHUNK_FILES" -d -a 5 "$all_pngs" "$chunk_list_dir/chunk_"
+    chunk_count="$(find "$chunk_list_dir" -maxdepth 1 -type f -name 'chunk_*' | wc -l | tr -d '[:space:]')"
+
+    ops_mega_mkdir "$MEGA_REMOTE_ROOT/$BATCH_NAME"
+
+    upload_small_dir_via_relay "$batch_dir/metadata" "$relay_batch_path"
+    upload_small_dir_via_relay "$batch_dir/manifests" "$relay_batch_path"
+
+    for chunk_file in "$chunk_list_dir"/chunk_*; do
+        [[ -f "$chunk_file" ]] || continue
+        chunk_number=$((chunk_number + 1))
+        files_in_chunk="$(wc -l < "$chunk_file" | tr -d '[:space:]')"
+
+        ops_info "Uploading heatmap chunk $chunk_number/$chunk_count ($files_in_chunk files)"
+        ops_relay_exec rm -rf "$relay_batch_path/heatmap_snapshots"
+        ops_relay_exec mkdir -p "$relay_batch_path/heatmap_snapshots"
+        rsync -az --files-from="$chunk_file" "$batch_dir/" "${MEGA_RELAY_HOST}:${relay_batch_path%/}/"
+        ops_mega_put_dir "$relay_batch_path/heatmap_snapshots" "$MEGA_REMOTE_ROOT/$BATCH_NAME" >/dev/null
+        ops_relay_exec rm -rf "$relay_batch_path/heatmap_snapshots"
+    done
+
+    rm -rf "$chunk_list_dir"
+    ops_relay_exec rm -rf "$relay_batch_path"
 }
 
 main() {
@@ -192,6 +265,8 @@ Dry run only. Planned actions:
   Include AI metadata: $OPS_INCLUDE_AI_METADATA
   Delete local staged batch after upload: $OPS_DELETE_LOCAL_AFTER_UPLOAD
   Delete relay staged batch after upload: $OPS_DELETE_RELAY_AFTER_UPLOAD
+  Chunked relay upload: $OPS_CHUNKED_RELAY_UPLOAD
+  Relay chunk files: $OPS_RELAY_CHUNK_FILES
 EOF
         exit 0
     fi
@@ -218,7 +293,11 @@ EOF
     ops_ensure_mega_session
     ops_mega_mkdir "$MEGA_REMOTE_ROOT"
 
-    if [[ "$MEGA_MODE" == "relay" ]]; then
+    if [[ "$MEGA_MODE" == "relay" && "$OPS_CHUNKED_RELAY_UPLOAD" == "1" ]]; then
+        relay_stage_path="${MEGA_RELAY_STAGING_DIR%/}/$BATCH_NAME"
+        ops_info "Uploading batch through relay in chunks: $relay_stage_path"
+        upload_batch_via_chunked_relay "$batch_dir" "$relay_stage_path"
+    elif [[ "$MEGA_MODE" == "relay" ]]; then
         relay_stage_path="${MEGA_RELAY_STAGING_DIR%/}/$BATCH_NAME"
         ops_info "Copying batch to relay host staging: $relay_stage_path"
         rsync -az "$batch_dir" "${MEGA_RELAY_HOST}:${MEGA_RELAY_STAGING_DIR%/}/"
